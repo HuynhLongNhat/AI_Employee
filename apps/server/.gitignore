@@ -1,0 +1,20 @@
+# Dependencies
+node_modules/
+
+# Build
+dist/
+*.tsbuildinfo
+
+# Env
+.env
+.env.local
+
+# Data local (nếu là DB/dev seed, không commit)
+data/
+!data/.gitkeep
+
+# Logs
+*.log
+
+# Nest
+.nest/
