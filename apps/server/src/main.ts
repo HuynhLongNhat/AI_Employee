@@ -6,9 +6,6 @@ async function bootstrap() {
   app.enableCors();
   app.setGlobalPrefix("api");
   await app.listen(8080);
-  app.getHttpAdapter().get("/api/hello", (req, res) => {
-    res.send("Hello World!");
-  });
   console.log("API running on http://localhost:8080/api");
 }
 bootstrap();

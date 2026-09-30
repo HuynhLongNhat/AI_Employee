@@ -21,6 +21,7 @@
 
 import { Module, Controller, Get } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { ChatController } from './chat/chat.controller';
 
 @Controller()
 class AppController {
@@ -39,6 +40,6 @@ class AppController {
       synchronize: true,
     }),
   ],
-  controllers: [AppController],
+  controllers: [AppController, ChatController],
 })
 export class AppModule {}
