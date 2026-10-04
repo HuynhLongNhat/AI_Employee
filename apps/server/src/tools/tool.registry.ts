@@ -8,10 +8,6 @@ export function registerTool(name: ToolName, handler: ToolHandler): void {
   tools.set(name, handler);
 }
 
-export function hasTool(name: string): name is ToolName {
-  return tools.has(name as ToolName);
-}
-
 export function callTool<R = any>(name: ToolName, args: any): R {
   const handler = tools.get(name);
 
