@@ -7,13 +7,13 @@ import {
 import {
   findMenuPrice,
   summarizeCart,
-  findMenuItemByName,
   findProductByName,
 } from "../common/menu";
 import {
   notFoundMenuReply,
   notInCartReply,
   NO_ORDER_REPLY,
+  LOGIN_REQUIRED_REPLY,
 } from "../common/messages";
 import { coffeeRules } from "../knowledge/coffee.rules";
 import { updateCart } from "../memory/cart.memory";
@@ -34,7 +34,7 @@ export function tryAwaitingConfirm(ctx: SkillContext): SkillResult | null {
   const no = isNoOrCancel(ctx.message);
 
   if (yes) {
-    const { total } = summarizeCart(ctx.cart.items, ctx.menu, ctx.products);
+    const { total } = summarizeCart(ctx.cart.items, [], ctx.products);
 
     const args: CreateOrderArgs = {
       customerId: ctx.customerId,
@@ -46,7 +46,7 @@ export function tryAwaitingConfirm(ctx: SkillContext): SkillResult | null {
 
     if (!result.ok) {
       ctx.cart.awaitingConfirm = false;
-      updateCart(ctx.customerId, ctx.cart);
+      updateCart(ctx.business.id, ctx.customerId, ctx.cart);
 
       return {
         reply:
@@ -59,7 +59,7 @@ export function tryAwaitingConfirm(ctx: SkillContext): SkillResult | null {
     ctx.cart.items = [];
     ctx.cart.awaitingConfirm = false;
     ctx.cart.pendingOrderId = order.id;
-    updateCart(ctx.customerId, ctx.cart);
+    updateCart(ctx.business.id, ctx.customerId, ctx.cart);
 
     return {
       reply: `Dạ, em đã tạo đơn ${order.id} ạ.\nTổng cộng: ${formatPrice(order.total)}.\nMình muốn nhận tại quán hay giao hàng ạ?`,
@@ -68,7 +68,7 @@ export function tryAwaitingConfirm(ctx: SkillContext): SkillResult | null {
 
   if (no) {
     ctx.cart.awaitingConfirm = false;
-    updateCart(ctx.customerId, ctx.cart);
+    updateCart(ctx.business.id, ctx.customerId, ctx.cart);
 
     return { reply: "Dạ, em chưa đặt đơn ạ. Mình cần thêm gì cứ nói em nhé." };
   }
@@ -110,7 +110,7 @@ export function tryPendingFulfillment(ctx: SkillContext): SkillResult | null {
 
       ctx.cart.pendingOrderId = undefined;
       ctx.cart.pendingPaymentOrderId = order.id;
-      updateCart(ctx.customerId, ctx.cart);
+      updateCart(ctx.business.id, ctx.customerId, ctx.cart);
 
       return {
         reply: `Dạ, em đã ghi nhận đơn ${order.id} nhận tại quán ạ.\nMình muốn thanh toán tiền mặt hay chuyển khoản ạ?`,
@@ -124,7 +124,7 @@ export function tryPendingFulfillment(ctx: SkillContext): SkillResult | null {
 
     ctx.cart.pendingOrderId = undefined;
     ctx.cart.pendingPaymentOrderId = order.id;
-    updateCart(ctx.customerId, ctx.cart);
+    updateCart(ctx.business.id, ctx.customerId, ctx.cart);
 
     return {
       reply: `Dạ, em đã ghi nhận đơn ${order.id} giao tới ${address} ạ.\nMình muốn thanh toán tiền mặt hay chuyển khoản ạ?`,
@@ -145,6 +145,10 @@ export function tryOrderStatus(ctx: SkillContext): SkillResult | null {
     !m.includes("xem đơn")
   ) {
     return null;
+  }
+
+  if (!ctx.isAuthenticated) {
+    return { reply: LOGIN_REQUIRED_REPLY };
   }
 
   const order = getLatestOrderByCustomer(ctx.customerId);
@@ -168,7 +172,7 @@ export function tryOrderStatus(ctx: SkillContext): SkillResult | null {
     paymentText = "chuyển khoản";
 
   const lines = order.items.map((item) => {
-    const price = findMenuPrice(item.name, ctx.menu, ctx.products);
+    const price = findMenuPrice(item.name, [], ctx.products);
     return formatLineItem(item.name, item.quantity, item.note, price);
   });
 
@@ -194,12 +198,16 @@ export function tryCancelIntent(ctx: SkillContext): SkillResult | null {
     return { reply: "Dạ, hiện tại mình chưa có đơn nào để huỷ ạ." };
   }
 
+  if (!ctx.isAuthenticated) {
+    return { reply: LOGIN_REQUIRED_REPLY };
+  }
+
   if (order.status === "cancelled") {
     return { reply: `Dạ, đơn ${order.id} đã được huỷ trước đó rồi ạ.` };
   }
 
   ctx.cart.pendingCancelOrderId = order.id;
-  updateCart(ctx.customerId, ctx.cart);
+  updateCart(ctx.business.id, ctx.customerId, ctx.cart);
 
   return {
     reply: `Dạ, mình chắc chắn muốn huỷ đơn ${order.id} chứ ạ? (có / không)`,
@@ -216,7 +224,7 @@ export function tryPendingEditAddress(ctx: SkillContext): SkillResult | null {
     updateOrder(order.id, { address });
 
     ctx.cart.pendingEditAddressOrderId = undefined;
-    updateCart(ctx.customerId, ctx.cart);
+    updateCart(ctx.business.id, ctx.customerId, ctx.cart);
 
     return {
       reply: `Dạ, em đã cập nhật địa chỉ giao hàng của đơn ${order.id} thành ${address} ạ.`,
@@ -255,7 +263,7 @@ export function tryEditAddressIntent(ctx: SkillContext): SkillResult | null {
   }
 
   ctx.cart.pendingEditAddressOrderId = order.id;
-  updateCart(ctx.customerId, ctx.cart);
+  updateCart(ctx.business.id, ctx.customerId, ctx.cart);
 
   return { reply: "Dạ, mình cho em xin địa chỉ mới ạ." };
 }
@@ -274,14 +282,14 @@ export function tryPendingCancel(ctx: SkillContext): SkillResult | null {
     updateOrder(order.id, { status: "cancelled" });
 
     ctx.cart.pendingCancelOrderId = undefined;
-    updateCart(ctx.customerId, ctx.cart);
+    updateCart(ctx.business.id, ctx.customerId, ctx.cart);
 
     return { reply: `Dạ, em đã huỷ đơn ${order.id} ạ.` };
   }
 
   if (no) {
     ctx.cart.pendingCancelOrderId = undefined;
-    updateCart(ctx.customerId, ctx.cart);
+    updateCart(ctx.business.id, ctx.customerId, ctx.cart);
 
     return { reply: `Dạ, em giữ nguyên đơn ${order.id} ạ.` };
   }
@@ -307,7 +315,7 @@ export function tryPendingPayment(ctx: SkillContext): SkillResult | null {
     updateOrder(order.id, { paymentMethod: "cash", status: "confirmed" });
 
     ctx.cart.pendingPaymentOrderId = undefined;
-    updateCart(ctx.customerId, ctx.cart);
+    updateCart(ctx.business.id, ctx.customerId, ctx.cart);
 
     return {
       reply: `Dạ, em đã ghi nhận đơn ${order.id} thanh toán tiền mặt ạ. Đơn của mình đã được xác nhận ạ.`,
@@ -321,7 +329,7 @@ export function tryPendingPayment(ctx: SkillContext): SkillResult | null {
     });
 
     ctx.cart.pendingPaymentOrderId = undefined;
-    updateCart(ctx.customerId, ctx.cart);
+    updateCart(ctx.business.id, ctx.customerId, ctx.cart);
 
     return {
       reply: `Dạ, em đã ghi nhận đơn ${order.id} thanh toán chuyển khoản ạ. Đơn của mình đã được xác nhận ạ.`,
@@ -342,19 +350,16 @@ export function tryOrderIntent(ctx: SkillContext): SkillResult | null {
   ) {
     return null;
   }
-
+  if (!ctx.isAuthenticated) {
+    return { reply: LOGIN_REQUIRED_REPLY };
+  }
   if (ctx.cart.items.length === 0) {
     return { reply: "Dạ, giỏ hàng của mình đang trống nên chưa đặt được ạ." };
   }
 
-  const { lines, total } = summarizeCart(
-    ctx.cart.items,
-    ctx.menu,
-    ctx.products,
-  );
-
+  const { lines, total } = summarizeCart(ctx.cart.items, [], ctx.products);
   ctx.cart.awaitingConfirm = true;
-  updateCart(ctx.customerId, ctx.cart);
+  updateCart(ctx.business.id, ctx.customerId, ctx.cart);
 
   return {
     reply: `Dạ, đơn của mình hiện tại:\n\n${lines.join("\n")}\n\nTổng cộng: ${formatPrice(total)} ạ.\n\nMình xác nhận đặt đơn này chứ ạ?`,
@@ -405,7 +410,7 @@ export function tryClearCart(ctx: SkillContext): SkillResult | null {
   }
 
   ctx.cart.items = [];
-  updateCart(ctx.customerId, ctx.cart);
+  updateCart(ctx.business.id, ctx.customerId, ctx.cart);
 
   return { reply: "Dạ, em đã xoá sạch giỏ hàng ạ." };
 }
@@ -429,7 +434,7 @@ export function tryCalculateTotal(ctx: SkillContext): SkillResult | null {
     };
   }
 
-  const { lines, total } = summarizeCart(ctx.cart.items, ctx.menu);
+  const { lines, total } = summarizeCart(ctx.cart.items, [], ctx.products);
 
   return {
     reply: `Dạ, đơn của mình hiện tại:\n\n${lines.join("\n")}\n\nTổng cộng: ${formatPrice(total)} ạ.`,
@@ -440,7 +445,7 @@ export function tryRemoveMatch(ctx: SkillContext): SkillResult | null {
   const removeMatch = ctx.message.match(/^(xoá|xóa|bỏ|remove)\s+(.+)$/i);
   if (!removeMatch) return null;
 
-  const item = findMenuItemByName(removeMatch[2].trim(), ctx.menu);
+  const item = findProductByName(ctx.products, removeMatch[2].trim());
 
   if (!item) return { reply: notFoundMenuReply(removeMatch[2].trim()) };
 
@@ -449,7 +454,7 @@ export function tryRemoveMatch(ctx: SkillContext): SkillResult | null {
   if (existingIndex === -1) return { reply: notInCartReply(item.name) };
 
   ctx.cart.items.splice(existingIndex, 1);
-  updateCart(ctx.customerId, ctx.cart);
+  updateCart(ctx.business.id, ctx.customerId, ctx.cart);
 
   return { reply: `Dạ, em đã xoá ${item.name} khỏi giỏ hàng ạ.` };
 }
@@ -466,7 +471,7 @@ export function tryEditTarget(ctx: SkillContext): SkillResult | null {
 
   if (!editTarget) return null;
 
-  const item = findMenuItemByName(editTarget.nameRaw, ctx.menu);
+  const item = findProductByName(ctx.products, editTarget.nameRaw);
 
   if (!item) return { reply: notFoundMenuReply(editTarget.nameRaw) };
 
@@ -476,13 +481,13 @@ export function tryEditTarget(ctx: SkillContext): SkillResult | null {
 
   if (editTarget.quantity <= 0) {
     ctx.cart.items.splice(existingIndex, 1);
-    updateCart(ctx.customerId, ctx.cart);
+    updateCart(ctx.business.id, ctx.customerId, ctx.cart);
 
     return { reply: `Dạ, em đã xoá ${item.name} khỏi giỏ hàng ạ.` };
   }
 
   ctx.cart.items[existingIndex].quantity = editTarget.quantity;
-  updateCart(ctx.customerId, ctx.cart);
+  updateCart(ctx.business.id, ctx.customerId, ctx.cart);
 
   return {
     reply: `Dạ, em đã cập nhật ${item.name} thành ${editTarget.quantity} ạ.`,
@@ -513,7 +518,7 @@ export function tryQuantityMatch(
     }
 
     // Fallback to legacy menu
-    const menuItem = findMenuItemByName(entities.item.trim(), ctx.menu);
+    const menuItem = findProductByName(ctx.products, entities.item.trim());
     if (!menuItem) return null;
 
     return applyAddItem(ctx, menuItem, entities.quantity, note);
@@ -545,7 +550,7 @@ export function tryQuantityMatch(
   if (!quantityMatch) return null;
 
   const quantity = parseInt(quantityMatch[1], 10);
-  const item = findMenuItemByName(quantityMatch[2].trim(), ctx.menu);
+  const item = findProductByName(ctx.products, quantityMatch[2].trim());
 
   if (!item) return null;
 
@@ -584,7 +589,7 @@ function applyAddItem(
     ctx.cart.items.push({ name: item.name, quantity, note });
   }
 
-  updateCart(ctx.customerId, ctx.cart);
+  updateCart(ctx.business.id, ctx.customerId, ctx.cart);
 
   return { reply: `Dạ, em đã thêm ${quantity} ${item.name} vào giỏ hàng ạ.` };
 }

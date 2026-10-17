@@ -10,45 +10,49 @@ export class FaqService {
     private readonly repo: Repository<FaqEntity>,
   ) {}
 
-  async create(data: {
-    question: string;
-    answer: string;
-    status?: FaqStatus;
-  }): Promise<FaqEntity> {
+  async create(
+    businessId: string,
+    data: { question: string; answer: string; status?: FaqStatus },
+  ): Promise<FaqEntity> {
     return this.repo.save({
+      businessId,
       question: data.question.trim(),
       answer: data.answer.trim(),
       status: data.status ?? "active",
     });
   }
 
-  async findAll(): Promise<FaqEntity[]> {
-    return this.repo.find({ order: { createdAt: "DESC" } });
+  async findAll(businessId: string): Promise<FaqEntity[]> {
+    return this.repo.find({
+      where: { businessId },
+      order: { createdAt: "DESC" },
+    });
   }
 
-  async findOne(id: string): Promise<FaqEntity | null> {
-    return this.repo.findOne({ where: { id } });
+  async findOne(id: string, businessId: string): Promise<FaqEntity | null> {
+    return this.repo.findOne({ where: { id, businessId } });
   }
 
   async update(
     id: string,
-    patch: Partial<{
-      question: string;
-      answer: string;
-      status: FaqStatus;
-    }>,
+    businessId: string,
+    patch: Partial<{ question: string; answer: string; status: FaqStatus }>,
   ): Promise<FaqEntity | null> {
-    await this.repo.update(id, patch);
-    return this.findOne(id);
+    const existing = await this.findOne(id, businessId);
+    if (!existing) return null;
+
+    Object.assign(existing, patch);
+    await this.repo.save(existing);
+    return existing;
   }
 
-  async remove(id: string): Promise<void> {
-    await this.repo.delete(id);
+  async remove(id: string, businessId: string): Promise<void> {
+    await this.repo.delete({ id, businessId });
   }
 
-  async findAllActive(): Promise<FaqEntity[]> {
+  async findAllActive(businessId: string): Promise<FaqEntity[]> {
     return this.repo.find({
-      where: { status: "active" },
+      where: { businessId, status: "active" },
       order: { createdAt: "DESC" },
     });
   }

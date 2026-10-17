@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { apiDelete, apiGet, apiPatch, apiPost } from '@/lib/api';
+import { useAuth } from '@clerk/nextjs';
+import { useBusinessContext } from '@/lib/business-context';
 
 export type ProductService = {
   id: string;
@@ -10,6 +12,7 @@ export type ProductService = {
   description: string;
   category: string;
   status: 'active' | 'inactive';
+  attributes: Record<string, unknown> | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -20,9 +23,12 @@ export type ProductServiceInput = {
   description: string;
   category: string;
   status: 'active' | 'inactive';
+  attributes?: Record<string, unknown>;
 };
 
 export function useProductsServices() {
+  const { isLoaded, isSignedIn } = useAuth();
+  const { activeId } = useBusinessContext();
   const [items, setItems] = useState<ProductService[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -31,8 +37,16 @@ export function useProductsServices() {
   const [reloadKey, setReloadKey] = useState(0);
 
   // Load effect — setState chỉ trong .then/.catch/.finally (async)
-  useEffect(() => {
+ useEffect(() => {
+    if (!isLoaded) return;
+    if (!isSignedIn) {
+      queueMicrotask(() => setLoading(false));
+      return;
+    }
+    if (!activeId) return;
+
     let cancelled = false;
+    queueMicrotask(() => setLoading(true));
 
     apiGet<ProductService[]>('/products-services')
       .then((data) => {
@@ -50,7 +64,7 @@ export function useProductsServices() {
     return () => {
       cancelled = true;
     };
-  }, [reloadKey]);
+  }, [reloadKey, isLoaded, isSignedIn, activeId]);
 
   const reload = useCallback(() => {
     setLoading(true);

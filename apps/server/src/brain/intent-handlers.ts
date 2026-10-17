@@ -9,7 +9,7 @@ import * as automation from "../skills/automation.skill";
 
 export const INTENT_HANDLERS: Record<Intent, SkillHandler> = {
   // ===== Chat / Customer service =====
-  "chat.greeting": customerService.tryGreeting,
+  "chat.greeting": customerService.tryGreeting, 
   "chat.view_menu": customerService.tryMenuView,
   "chat.ask_price": customerService.tryProductPrice,
   "chat.ask_item_detail": customerService.tryDetailQuestion,
@@ -24,7 +24,6 @@ export const INTENT_HANDLERS: Record<Intent, SkillHandler> = {
   "shop.address": customerService.tryAddress,
   "shop.opening_hours": customerService.tryOpeningHours,
   "shop.wifi": customerService.tryWifi,
-  "shop.parking": customerService.tryParking,
   "shop.phone": customerService.tryPhone,
   "shop.name": customerService.tryBusinessName,
 
@@ -63,7 +62,7 @@ export const INTENT_HANDLERS: Record<Intent, SkillHandler> = {
   "complaint.enter_content": customerCare.tryPendingComplaint,
   "refund.intent": customerCare.tryRefundIntent,
   "refund.enter_reason": customerCare.tryPendingRefund,
-  "refund.policy_query": customerService.tryRefundPolicyQuery,
+  "policy.query": customerService.tryPolicyQuery,
   "reservation.intent": customerCare.tryReservationIntent,
   "reservation.enter_details": customerCare.tryPendingReservation,
   "handoff.intent": customerCare.tryHandoffIntent,
@@ -84,11 +83,8 @@ export const INTENT_HANDLERS: Record<Intent, SkillHandler> = {
   "owner.tier_upgrade_candidates": ownerOps.tryTierUpgrade,
   "owner.view_conversation_logs": ownerOps.tryViewLogs,
 
-  // ===== Knowledge admin =====
-  "admin.update_shop_info": knowledgeAdmin.tryKnowledgeOverrideCommand,
+  // ===== Knowledge admin =====,
   "admin.view_knowledge": knowledgeAdmin.tryViewKnowledge,
-  "admin.update_price": knowledgeAdmin.trySetPrice,
-  "admin.view_menu": knowledgeAdmin.tryViewMenu,
   "admin.update_promotion": knowledgeAdmin.trySetDiscount,
   "admin.view_promotions": knowledgeAdmin.tryViewPromotions,
   "admin.view_refund_policy": knowledgeAdmin.tryViewRefundPolicy,
@@ -97,8 +93,4 @@ export const INTENT_HANDLERS: Record<Intent, SkillHandler> = {
   "automation.run_remind_vip": automation.tryRunAutomation,
   "automation.view_logs": automation.tryViewAutomationLogs,
 
-  // ===== Test tooling =====
-  "test.set_tier": ownerOps.trySetTier,
-  "test.set_points": ownerOps.trySetPoints,
-  "test.set_role": ownerOps.tryRoleCommand,
 };

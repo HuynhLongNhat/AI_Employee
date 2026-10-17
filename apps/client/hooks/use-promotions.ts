@@ -1,7 +1,9 @@
 'use client';
 
+import { useAuth } from '@clerk/nextjs';
 import { useCallback, useEffect, useState } from 'react';
 import { apiDelete, apiGet, apiPatch, apiPost } from '@/lib/api';
+import { useBusinessContext } from '@/lib/business-context';
 
 export type Promotion = {
   id: string;
@@ -29,6 +31,8 @@ export type PromotionInput = {
 };
 
 export function usePromotions() {
+  const { isLoaded, isSignedIn } = useAuth();
+  const { activeId } = useBusinessContext();
   const [items, setItems] = useState<Promotion[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -37,7 +41,15 @@ export function usePromotions() {
   const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
+    if (!isLoaded) return;
+    if (!isSignedIn) {
+      queueMicrotask(() => setLoading(false));
+      return;
+    }
+    if (!activeId) return;
+
     let cancelled = false;
+    queueMicrotask(() => setLoading(true));
 
     apiGet<Promotion[]>('/promotions')
       .then((data) => {
@@ -55,10 +67,9 @@ export function usePromotions() {
     return () => {
       cancelled = true;
     };
-  }, [reloadKey]);
+  }, [reloadKey, isLoaded, isSignedIn, activeId]);
 
   const reload = useCallback(() => {
-    setLoading(true);
     setReloadKey((k) => k + 1);
   }, []);
 

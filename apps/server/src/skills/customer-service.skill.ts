@@ -1,16 +1,12 @@
 import { getConversation } from "../memory/chat.memory";
 import { updateCustomer } from "../memory/customer.memory";
-import {
-  getEffectiveAddress,
-  getEffectiveOpeningHours,
-  getEffectivePhone,
-  getEffectiveWifiName,
-  getEffectiveWifiPassword,
-  getEffectiveParking,
-  getEffectiveBusinessName, 
-} from "../knowledge/knowledge.override.memory";
-import { formatMenuText, findProductByName } from "../common/menu";
-import type { BrainEntities, SkillContext, SkillResult } from "./types";
+import { findProductByName } from "../common/menu";
+import type {
+  BrainEntities,
+  ProductServiceItem,
+  SkillContext,
+  SkillResult,
+} from "./types";
 
 export function tryPromotions(
   ctx: SkillContext,
@@ -45,10 +41,9 @@ export function tryPromotions(
 
   if (matchedPromos.length === 1) {
     const p = matchedPromos[0];
-    const name = getEffectiveBusinessName() ?? "quán";
     return {
       reply:
-        `Dạ, **${name}** có chương trình **${p.name}**\n\n` +
+        `Dạ, **${ctx.business.name}** có chương trình **${p.name}**\n\n` +
         `- **Mức giảm:** ${p.discount}\n` +
         `- **Điều kiện:** ${p.condition}\n` +
         `- ${p.description}`,
@@ -65,9 +60,8 @@ export function tryPromotions(
     )
     .join("\n\n");
 
-  const name = getEffectiveBusinessName() ?? "quán";
   return {
-    reply: `Dạ, **${name}** đang có các chương trình khuyến mãi sau:\n\n${promoText}`,
+    reply: `Dạ, **${ctx.business.name}** đang có các chương trình khuyến mãi sau:\n\n${promoText}`,
   };
 }
 
@@ -112,48 +106,73 @@ export function tryShortContext(ctx: SkillContext): SkillResult | null {
   return { reply: "Dạ, nếu mình muốn cà phê nhẹ thì em gợi ý Bạc xỉu ạ." };
 }
 
-export function tryGreeting(ctx: SkillContext): SkillResult | null {
-  const m = ctx.message;
-  if (!m.includes("xin chào") && m !== "chào" && m !== "hello" && m !== "hi") {
-    return null;
+export function tryGreeting(
+  ctx: SkillContext,
+  entities?: BrainEntities,
+): SkillResult | null {
+  // Nếu được gọi từ Brain → LLM đã xác nhận là greeting → bypass regex guard
+  const invokedByBrain = entities !== undefined;
+
+  if (!invokedByBrain) {
+    const m = ctx.message;
+    const isGreeting =
+      m === "chào" || m === "hi" || m === "hello" || m.includes("xin chào");
+    if (!isGreeting) return null;
   }
 
-  const name = ctx.aiConfig.name;
-  const greeting = name
-    ? `Dạ em là ${name}, em có thể giúp gì cho mình ạ?`
+  const aiName = ctx.aiConfig.name;
+  const greeting = aiName
+    ? `${aiName} xin chào ạ, em có thể giúp gì cho mình ạ?`
     : "Dạ em chào anh/chị ạ! Em có thể giúp gì cho mình?";
 
   return { reply: greeting };
 }
 
-export function tryMenuView(ctx: SkillContext): SkillResult | null {
-  const m = ctx.message;
-  if (
-    !m.includes("menu") &&
-    !m.includes("thực đơn") &&
-    !m.includes("đồ uống") &&
-    !m.includes("có những món gì")
-  ) {
-    return null;
+export function tryMenuView(
+  ctx: SkillContext,
+  entities?: BrainEntities,
+): SkillResult | null {
+  const invokedByBrain = entities !== undefined;
+
+  if (!invokedByBrain) {
+    const m = ctx.message;
+    if (
+      !m.includes("menu") &&
+      !m.includes("thực đơn") &&
+      !m.includes("đồ uống") &&
+      !m.includes("có những món gì")
+    ) {
+      return null;
+    }
   }
-const name = getEffectiveBusinessName() ?? "quán";
-  const menuText = ctx.menu
-    .map((item) => `- **${item.name}**: ${item.price.toLocaleString("vi-VN")}đ`)
+
+  const businessName = ctx.business.name || "doanh nghiệp";
+  const productTerm = ctx.business.terminology.productTerm || "sản phẩm";
+
+  if (ctx.products.length === 0) {
+    return {
+      reply: `Dạ, ${businessName} hiện chưa có ${productTerm} nào ạ.`,
+    };
+  }
+
+  const activeProducts = ctx.products.filter((p) => p.status === "active");
+  const lines = activeProducts
+    .map((p) => `- **${p.name}**: ${p.price.toLocaleString("vi-VN")}đ`)
     .join("\n");
-  return { reply: `Dạ, menu của **${name}** hiện có:\n\n${menuText}` };
+
+  return {
+    reply: `Dạ, ${productTerm} của **${businessName}** hiện có:\n\n${lines}`,
+  };
 }
 
 export function tryAddress(ctx: SkillContext): SkillResult | null {
   const m = ctx.message;
   if (!m.includes("ở đâu") && !m.includes("địa chỉ")) return null;
 
-  const address = getEffectiveAddress();
-  if (address === null) {
-    return { reply: "Dạ, em chưa có thông tin địa chỉ quán ạ." };
-  }
+  const address = ctx.business.address;
+  if (!address) return { reply: "Dạ, em chưa có thông tin địa chỉ ạ." };
 
-  const name = getEffectiveBusinessName() ?? "quán";
-  return { reply: `Dạ, ${name} ở ${address} ạ.` };
+  return { reply: `Dạ, **${ctx.business.name}** ở ${address} ạ.` };
 }
 
 export function tryBusinessName(ctx: SkillContext): SkillResult | null {
@@ -167,7 +186,7 @@ export function tryBusinessName(ctx: SkillContext): SkillResult | null {
     return null;
   }
 
-  const name = getEffectiveBusinessName();
+  const name = ctx.business.name;
   if (name === null) {
     return { reply: "Dạ, em chưa có thông tin tên quán ạ." };
   }
@@ -182,25 +201,20 @@ export function tryOpeningHours(ctx: SkillContext): SkillResult | null {
     !m.includes("giờ mở cửa") &&
     !m.includes("mấy giờ")
   )
-    return null; 
- 
-  const name = getEffectiveBusinessName();
+    return null;
 
-  const hours = getEffectiveOpeningHours();
-  if (hours === null) {
-    return { reply: "Dạ, em chưa có thông tin giờ mở cửa ạ." };
-  }
-  return { reply: `Dạ, **${name}** mở cửa ${hours} ạ.` };
+  const hours = ctx.business.openingHours;
+  if (!hours) return { reply: "Dạ, em chưa có thông tin giờ mở cửa ạ." };
+
+  return { reply: `Dạ, **${ctx.business.name}** mở cửa ${hours} ạ.` };
 }
 
 export function tryWifi(ctx: SkillContext): SkillResult | null {
   if (!ctx.message.includes("wifi")) return null;
 
-  const wifiName = getEffectiveWifiName();
-  const wifiPassword = getEffectiveWifiPassword();
-
-  if (wifiName === null || wifiPassword === null) {
-    return { reply: "Dạ, em chưa có thông tin wifi của quán ạ." };
+  const { wifiName, wifiPassword } = ctx.business;
+  if (!wifiName || !wifiPassword) {
+    return { reply: "Dạ, em chưa có thông tin wifi ạ." };
   }
 
   return {
@@ -208,29 +222,16 @@ export function tryWifi(ctx: SkillContext): SkillResult | null {
   };
 }
 
-export function tryParking(ctx: SkillContext): SkillResult | null {
-  const m = ctx.message;
-  if (!m.includes("đậu xe") && !m.includes("đỗ xe") && !m.includes("gửi xe"))
-    return null;
-
-  const parking = getEffectiveParking();
-  if (parking === null) {
-    return { reply: "Dạ, em chưa có thông tin gửi xe của quán ạ." };
-  }
-  return { reply: `Dạ, ${parking}` };
-}
-
 export function tryPhone(ctx: SkillContext): SkillResult | null {
   const m = ctx.message;
   if (!m.includes("số điện thoại") && !m.includes("số điện")) return null;
 
-  const phone = getEffectivePhone();
-  if (phone === null) {
-    return { reply: "Dạ, em chưa có thông tin số điện thoại quán ạ." };
-  }
+  const phone = ctx.business.phone;
+  if (!phone) return { reply: "Dạ, em chưa có thông tin số điện thoại ạ." };
 
-  const name = getEffectiveBusinessName() ?? "quán";
-  return { reply: `Dạ, số điện thoại của ${name} là ${phone} ạ.` };
+  return {
+    reply: `Dạ, số điện thoại của **${ctx.business.name}** là ${phone} ạ.`,
+  };
 }
 
 export function tryProductPrice(
@@ -283,22 +284,50 @@ function normalizeForMatch(s: string): string {
 
 export function tryPriceQuestion(ctx: SkillContext): SkillResult | null {
   const m = ctx.message;
-
-  if (!m.includes("bao nhiêu") && !m.includes("giá") && !m.includes("bao tiền"))
+  if (
+    !m.includes("bao nhiêu") &&
+    !m.includes("giá") &&
+    !m.includes("bao tiền")
+  ) {
     return null;
+  }
 
-  const item = ctx.menu.find((item) => m.includes(item.name.toLowerCase()));
+  const product = ctx.products.find((p) => m.includes(p.name.toLowerCase()));
 
-  if (item) {
+  if (product) {
     return {
-      reply: `Dạ, ${item.name} giá ${item.price.toLocaleString("vi-VN")}đ ạ.`,
+      reply: `Dạ, **${product.name}** giá ${product.price.toLocaleString("vi-VN")}đ ạ.`,
     };
   }
 
-  return { reply: "Dạ, em chưa tìm thấy món này trong menu ạ." };
+  return { reply: "Dạ, em chưa tìm thấy sản phẩm này trong danh sách ạ." };
 }
 
-export function tryDetailQuestion(ctx: SkillContext): SkillResult | null {
+export function tryDetailQuestion(
+  ctx: SkillContext,
+  entities?: BrainEntities,
+): SkillResult | null {
+  const invokedByBrain = entities !== undefined;
+
+  // ===== Brain path — dùng entities.item =====
+  if (invokedByBrain) {
+    const itemName =
+      typeof entities.item === "string" ? entities.item.trim() : "";
+
+    if (!itemName) return null;
+
+    const product = findProductByName(ctx.products, itemName);
+
+    if (!product) {
+      return {
+        reply: `Dạ, em chưa có thông tin về "${itemName}" ạ.`,
+      };
+    }
+
+    return { reply: formatProductDetail(product) };
+  }
+
+  // ===== Regex path — match tên product trong message =====
   const m = ctx.message;
 
   if (
@@ -311,13 +340,39 @@ export function tryDetailQuestion(ctx: SkillContext): SkillResult | null {
     return null;
   }
 
-  const item = ctx.menu.find((item) => m.includes(item.name.toLowerCase()));
+  const product = ctx.products.find((p) => m.includes(p.name.toLowerCase()));
 
-  if (item) {
-    return { reply: `Dạ, ${item.name}: ${item.description}` };
+  if (!product) return null;
+
+  return { reply: formatProductDetail(product) };
+}
+
+function formatProductDetail(product: ProductServiceItem): string {
+  const parts: string[] = [`Dạ, **${product.name}**:`];
+
+  if (product.description) {
+    parts.push("", product.description);
   }
 
-  return { reply: "Dạ, em chưa tìm thấy món này trong menu ạ." };
+  const attrs = product.attributes as Record<string, unknown> | null;
+  if (attrs && Object.keys(attrs).length > 0) {
+    const lines = Object.entries(attrs)
+      .filter(([, v]) => v !== undefined && v !== null && v !== "")
+      .map(([k, v]) => {
+        const value = Array.isArray(v) ? v.join(", ") : String(v);
+        return `- ${k}: ${value}`;
+      });
+
+    if (lines.length > 0) {
+      parts.push("", "**Chi tiết:**", ...lines);
+    }
+  }
+
+  if (parts.length === 1) {
+    return `Dạ, em chưa có thông tin chi tiết về **${product.name}** ạ.`;
+  }
+
+  return parts.join("\n");
 }
 
 const RECOMMENDATION_KEYWORDS = [
@@ -332,7 +387,56 @@ const RECOMMENDATION_KEYWORDS = [
   "thích matcha",
 ];
 
-export function tryRecommendation(ctx: SkillContext): SkillResult | null {
+export function tryRecommendation(
+  ctx: SkillContext,
+  entities?: BrainEntities,
+): SkillResult | null {
+  const invokedByBrain = entities !== undefined;
+
+  // ===== Brain path — đọc DB products =====
+  if (invokedByBrain) {
+    const positive = extractStringArray(entities.positivePreferences);
+    const negative = extractStringArray(entities.negativePreferences);
+
+    if (positive.length === 0 && negative.length === 0) {
+      return null; // không extract được preference → fall through
+    }
+
+    const matched = ctx.products.filter((p) => {
+      const attrs = (p.attributes ?? {}) as Record<string, unknown>;
+      const suitable = toStringArray(attrs.suitableFor);
+      const notSuitable = toStringArray(attrs.notSuitableFor);
+
+      // Exclude nếu negative match notSuitableFor
+      const hasNeg = negative.some((n) =>
+        notSuitable.some((ns) => tagMatches(ns, n)),
+      );
+      if (hasNeg) return false;
+
+      // Include nếu positive match suitableFor
+      const hasPos = positive.some((pr) =>
+        suitable.some((s) => tagMatches(s, pr)),
+      );
+      return hasPos;
+    });
+
+    if (matched.length === 0) {
+      return {
+        reply:
+          "Dạ, em chưa tìm được sản phẩm/dịch vụ phù hợp với sở thích của mình ạ.",
+      };
+    }
+
+    const lines = matched
+      .map((p) => `- **${p.name}**: ${p.description}`)
+      .join("\n");
+
+    return {
+      reply: `Dạ, dựa theo nhu cầu của mình, em gợi ý:\n\n${lines}`,
+    };
+  }
+
+  // ===== Regex path (legacy — fallback khi LLM off) =====
   const normalizedMessage = ctx.message
     .replace(/thích uống đồ ngọt/g, "thích ngọt")
     .replace(/thích đồ ngọt/g, "thích ngọt")
@@ -348,50 +452,145 @@ export function tryRecommendation(ctx: SkillContext): SkillResult | null {
 
   if (matchedNeeds.length === 0) return null;
 
-  const recommendations = ctx.menu.filter((item) =>
-    matchedNeeds.some((need) => item.suitableFor.includes(need)),
-  );
+  const recommendations = ctx.products.filter((p) => {
+    const attrs = (p.attributes ?? {}) as Record<string, unknown>;
+    const suitable = Array.isArray(attrs.suitableFor)
+      ? (attrs.suitableFor as string[])
+      : [];
+    return matchedNeeds.some((need) => suitable.includes(need));
+  });
 
   if (recommendations.length === 0) return null;
 
   const recommendationText = recommendations
-    .map((item) => `${item.name}: ${item.description}`)
+    .map((item) => `- **${item.name}**: ${item.description}`)
     .join("\n");
 
   return {
-    reply: `Dạ, dựa theo nhu cầu của mình, em gợi ý:\n${recommendationText}`,
+    reply: `Dạ, dựa theo nhu cầu của mình, em gợi ý:\n\n${recommendationText}`,
   };
 }
 
-export function tryCompare(ctx: SkillContext): SkillResult | null {
-  const m = ctx.message;
+function extractStringArray(v: unknown): string[] {
+  if (typeof v === "string") {
+    return v
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+  if (Array.isArray(v)) {
+    return v.filter(
+      (x): x is string => typeof x === "string" && x.trim().length > 0,
+    );
+  }
+  return [];
+}
 
-  if (
-    !m.includes("khác nhau") &&
-    !m.includes("so sánh") &&
-    !m.includes("khác gì") &&
-    !m.includes("nên chọn")
-  ) {
-    return null;
+function toStringArray(v: unknown): string[] {
+  if (Array.isArray(v)) {
+    return v.filter((x): x is string => typeof x === "string");
+  }
+  return [];
+}
+
+function tagMatches(a: string, b: string): boolean {
+  const na = normalizeForMatch(a);
+  const nb = normalizeForMatch(b);
+  if (!na || !nb) return false;
+  return na === nb || na.includes(nb) || nb.includes(na);
+}
+
+export function tryCompare(
+  ctx: SkillContext,
+  entities?: BrainEntities,
+): SkillResult | null {
+  const invokedByBrain = entities !== undefined;
+
+  if (!invokedByBrain) {
+    const m = ctx.message;
+    if (
+      !m.includes("khác nhau") &&
+      !m.includes("so sánh") &&
+      !m.includes("khác gì") &&
+      !m.includes("nên chọn")
+    ) {
+      return null;
+    }
   }
 
-  const mentionedItems = ctx.menu.filter((item) =>
-    m.includes(item.name.toLowerCase()),
-  );
+  const message = ctx.message;
 
-  if (mentionedItems.length >= 2) {
-    const [first, second] = mentionedItems;
+  // Tìm products + vị trí xuất hiện trong message
+  const mentioned = ctx.products
+    .map((p) => ({
+      product: p,
+      index: message.indexOf(p.name.toLowerCase()),
+    }))
+    .filter((x) => x.index !== -1)
+    .sort((a, b) => a.index - b.index);
 
+  if (mentioned.length < 2) {
     return {
-      reply:
-        `Dạ, ${first.name} có vị cà phê ${first.profile.coffeeLevel}, ` +
-        `độ ngọt ${first.profile.sweetness}, lượng sữa ${first.profile.milkLevel}. ` +
-        `${second.name} có vị cà phê ${second.profile.coffeeLevel}, ` +
-        `độ ngọt ${second.profile.sweetness}, lượng sữa ${second.profile.milkLevel}.`,
+      reply: "Dạ, anh/chị cho em biết 2 sản phẩm/dịch vụ mình muốn so sánh ạ.",
     };
   }
 
-  return { reply: "Dạ, anh/chị cho em biết 2 món mình muốn so sánh ạ." };
+  const [first, second] = mentioned.slice(0, 2).map((x) => x.product);
+
+  return {
+    reply: buildCompareReply(first, second),
+  };
+}
+
+function buildCompareReply(
+  first: {
+    name: string;
+    description: string;
+    price: number;
+    attributes: Record<string, unknown> | null;
+  },
+  second: {
+    name: string;
+    description: string;
+    price: number;
+    attributes: Record<string, unknown> | null;
+  },
+): string {
+  const firstAttrs = first.attributes ?? {};
+  const secondAttrs = second.attributes ?? {};
+
+  // Union keys, bỏ suitableFor/notSuitableFor
+  const allKeys = Array.from(
+    new Set([...Object.keys(firstAttrs), ...Object.keys(secondAttrs)]),
+  ).filter((k) => k !== "suitableFor" && k !== "notSuitableFor");
+
+  const formatPrice = (n: number) => n.toLocaleString("vi-VN") + "đ";
+  const formatVal = (v: unknown) =>
+    v === undefined ? "—" : Array.isArray(v) ? v.join(", ") : String(v);
+
+  const lines: string[] = [];
+  lines.push(`Dạ, so sánh **${first.name}** và **${second.name}**:`);
+  lines.push("");
+  lines.push(`**${first.name}** — ${formatPrice(first.price)}`);
+  if (first.description) {
+    lines.push(""); // ← blank line
+    lines.push(`_${first.description}_`);
+  }
+  for (const key of allKeys) {
+    lines.push(`- ${key}: ${formatVal(firstAttrs[key])}`);
+  }
+
+  lines.push("");
+  lines.push(`**${second.name}** — ${formatPrice(second.price)}`);
+  if (second.description) {
+    lines.push("");
+    lines.push(`_${second.description}_`);
+  }
+  for (const key of allKeys) {
+    lines.push(`- ${key}: ${formatVal(secondAttrs[key])}`);
+  }
+
+  return lines.join("\n");
 }
 
 export function tryUnclear(ctx: SkillContext): SkillResult | null {
@@ -438,26 +637,44 @@ export function tryFaq(ctx: SkillContext): SkillResult | null {
   return { reply: matched.item.answer };
 }
 
-export function tryRefundPolicyQuery(ctx: SkillContext): SkillResult | null {
+export function tryPolicyQuery(
+  ctx: SkillContext,
+  entities?: BrainEntities,
+): SkillResult | null {
+  const invokedByBrain = entities !== undefined;
+
+  if (!invokedByBrain) {
+    const m = ctx.message;
+    if (!m.includes("chính sách") && !m.includes("policy")) return null;
+  }
+
+  if (ctx.policies.length === 0) {
+    return { reply: "Dạ, hiện tại chưa có chính sách nào ạ." };
+  }
+
   const m = ctx.message;
+  const matched = ctx.policies
+    .map((p) => {
+      const titleWords = p.title
+        .toLowerCase()
+        .split(/\s+/)
+        .filter((w) => w.length > 2);
+      const score = titleWords.filter((w) => m.includes(w)).length;
+      return { policy: p, score };
+    })
+    .filter((r) => r.score >= 2)
+    .sort((a, b) => b.score - a.score)[0];
 
-  if (
-    !m.includes("chính sách hoàn tiền") &&
-    !m.includes("hoàn tiền như thế nào") &&
-    !m.includes("điều kiện hoàn tiền") &&
-    !m.includes("quy trình hoàn tiền") &&
-    !m.includes("hoàn tiền được không")
-  ) {
-    return null;
+  if (matched) {
+    return {
+      reply: `**${matched.policy.title}**\n\n${matched.policy.content}`,
+    };
   }
 
-  const policy = ctx.policies.refund;
-
-  if (!policy) {
-    return { reply: "Dạ, em chưa có thông tin chính sách hoàn tiền ạ." };
-  }
-
-  return { reply: `Dạ, ${policy}` };
+  const list = ctx.policies.map((p) => `- **${p.title}**`).join("\n");
+  return {
+    reply: `Dạ, hiện có các chính sách sau:\n\n${list}\n\nMình muốn hỏi chính sách nào ạ?`,
+  };
 }
 
 export function tryFallback(_ctx: SkillContext): SkillResult {

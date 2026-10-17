@@ -210,34 +210,6 @@ const RULES: IntentRule[] = [
     confidence: 0.9,
   },
 
-  // ===== TEST TOOLING =====
-  {
-    intent: "test.set_tier",
-    when: (m) => /^mình hạng (đồng|bạc|vàng|bronze|silver|gold)$/i.test(m),
-    extract: (m) => {
-      const match = m.match(/^mình hạng (đồng|bạc|vàng|bronze|silver|gold)$/i);
-      return (match ? { tier: match[1].toLowerCase() } : {}) as Entities;
-    },
-    confidence: 0.9,
-  },
-  {
-    intent: "test.set_points",
-    when: (m) => /^mình có (\d+) điểm$/i.test(m),
-    extract: (m) => {
-      const match = m.match(/^mình có (\d+) điểm$/i);
-      return (match ? { points: parseInt(match[1], 10) } : {}) as Entities;
-    },
-    confidence: 0.9,
-  },
-  {
-    intent: "test.set_role",
-    when: (m) =>
-      /^mình là chủ quán$/i.test(m) ||
-      /^mình là nhân viên$/i.test(m) ||
-      /^mình là khách$/i.test(m),
-    confidence: 0.9,
-  },
-
   {
     intent: "owner.view_all_orders",
     when: (m) =>
@@ -249,43 +221,11 @@ const RULES: IntentRule[] = [
 
   // ===== KNOWLEDGE ADMIN =====
   {
-    intent: "admin.update_shop_info",
-    when: (m) =>
-      /^đổi giờ mở cửa thành (.+)$/i.test(m) ||
-      /^đổi số điện thoại thành (.+)$/i.test(m) ||
-      /^đổi địa chỉ thành (.+)$/i.test(m) ||
-      /^đổi tên wifi thành (.+)$/i.test(m) ||
-      /^đổi mật khẩu wifi thành (.+)$/i.test(m) ||
-      /^đổi gửi xe thành (.+)$/i.test(m),
-    confidence: 0.9,
-  },
-  {
     intent: "admin.view_knowledge",
     when: (m) =>
       m.includes("xem knowledge") ||
       m.includes("xem cấu hình") ||
       m.includes("knowledge hiện tại"),
-    confidence: 0.9,
-  },
-  {
-    intent: "admin.update_price",
-    when: (m) => /^đổi giá (.+?) thành (\d+)$/i.test(m),
-    extract: (m) => {
-      const match = m.match(/^đổi giá (.+?) thành (\d+)$/i);
-      if (!match) return {} as Entities;
-      return {
-        item: match[1].trim(),
-        price: parseInt(match[2], 10),
-      } as Entities;
-    },
-    confidence: 0.9,
-  },
-  {
-    intent: "admin.view_menu",
-    when: (m) =>
-      m.includes("xem menu") ||
-      m.includes("menu hiện tại") ||
-      m.includes("menu đầy đủ"),
     confidence: 0.9,
   },
   {
@@ -362,15 +302,10 @@ const RULES: IntentRule[] = [
     confidence: 0.9,
   },
   {
-    intent: "refund.policy_query",
-    when: (m) =>
-      m.includes("chính sách hoàn tiền") ||
-      m.includes("hoàn tiền như thế nào") ||
-      m.includes("điều kiện hoàn tiền") ||
-      m.includes("quy trình hoàn tiền") ||
-      m.includes("hoàn tiền được không"),
-    confidence: 0.9,
-  },
+  intent: "policy.query",
+  when: (m) => m.includes("chính sách") || m.includes("policy"),
+  confidence: 0.9,
+},
   {
     intent: "handoff.intent",
     when: (m) =>
@@ -546,12 +481,6 @@ const RULES: IntentRule[] = [
   {
     intent: "shop.wifi",
     when: (m) => m.includes("wifi"),
-    confidence: 0.9,
-  },
-  {
-    intent: "shop.parking",
-    when: (m) =>
-      m.includes("đậu xe") || m.includes("đỗ xe") || m.includes("gửi xe"),
     confidence: 0.9,
   },
   {

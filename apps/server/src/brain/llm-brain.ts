@@ -15,7 +15,7 @@ import type {
 import type { LlmProvider } from "./llm-provider.contract";
 import { INTENTS } from "./intent-catalog";
 
-const INTENT_SET: Set<string> = new Set<string>([...INTENTS]);
+const INTENT_SET: Set<string> = new Set(INTENTS.map((i) => i as string));
 
 const FALLBACK: BrainOutput = {
   intent: "chat.unknown",
@@ -34,11 +34,16 @@ export class LlmBrain implements Brain {
     try {
       const out = await this.provider.generate({ systemPrompt, userPrompt });
       text = out.text;
-    } catch {
+    } catch (err) {
+      console.error("[LlmBrain] provider error:", err);
       return FALLBACK;
     }
 
-    return parseBrainOutput(text);
+    const result = parseBrainOutput(text);
+    console.log("[LlmBrain] msg:", input.message);
+    console.log("[LlmBrain] raw:", text);
+    console.log("[LlmBrain] parsed:", JSON.stringify(result));
+    return result;
   }
 }
 
@@ -57,42 +62,79 @@ function buildSystemPrompt(): string {
     "Intent-specific entity hints:",
     "",
     "- cart.add_item → { item: string, quantity: number, note?: string }",
-    '  The "item" value MUST be one of the product names from "knownProducts" in the user context.',
-    "  Map typo, abbreviation, or accentless input to the correct product name from the list.",
-    "  Do NOT invent product names that are not in the list.",
-    '  Example: "cho mình 2 cf sữa" → {"item": "cà phê sữa", "quantity": 2}',
-    "",
+    "  ONLY use when user EXPLICITLY names a product/service they want to order.",
+    '  The "item" value MUST be one of the product names from "knownProducts".',
+    "  Map typo, abbreviation, or accentless input to the correct product name.",
+    "  Do NOT infer item from user preference/need. If user only describes what they want (không có tên sản phẩm) → use chat.recommend instead.",
+    "  Examples:",
+    '    "cho mình 2 cf sữa" → {"item": "cà phê sữa", "quantity": 2}',
+    '    "mình muốn 1 trà đào" → {"item": "trà đào", "quantity": 1}',
+    '    "Mình muốn tập gym tăng cơ" → NOT cart.add_item (no product name) → use chat.recommend',
     "- promotion.query → {}",
     "  User asks about promotions, discounts, or special offers.",
     '  Trigger words: "khuyến mãi", "giảm giá", "ưu đãi", "promo", "sinh nhật", "happy hour", "học sinh", "sinh viên".',
     "- chat.ask_price → { item?: string }",
-    "  User hỏi giá một món/dịch vụ cụ thể.",
+    "  User asks for the price of a specific product/service.",
+    "  Works for any industry: món, dịch vụ, gói tập, liệu trình, sản phẩm.",
     '  Example: "cà phê sữa bao nhiêu tiền" → {"item": "cà phê sữa"}',
     "",
+    "- chat.faq → {}",
+    "  User asks a general FAQ question about the shop/services that is NOT covered by specific shop.* intents.",
+    "  Trigger patterns (Vietnamese):",
+    '    "shop có X không", "quán có X không", "có nhận X không", "có hỗ trợ X không"',
+    "    where X is a feature/service: giao hàng, máy lạnh, mang đồ ăn ngoài, đặt trước, chỗ đậu xe, thanh toán thẻ, ship, ...",
+    "  DO NOT use chat.faq for: address, opening hours, phone, wifi, menu, price. Those have specific intents (shop.address, shop.opening_hours, shop.phone, shop.wifi, chat.view_menu, chat.ask_price).",
+    "  Examples:",
+    '    "shop có giao hàng không" → chat.faq',
+    '    "quán có máy lạnh không" → chat.faq',
+    '    "có nhận đặt trước không" → chat.faq',
+    '    "shop ở đâu" → shop.address (NOT chat.faq)',
+    "- chat.recommend → { positivePreferences?: string, negativePreferences?: string }",
+    "  User DESCRIBES a need/preference/mood WITHOUT naming a specific product.",
+    '  Trigger: "muốn ...", "thích ...", "cần ...", "đang tìm ...", "tư vấn ..."',
+    "  Examples:",
+    '    "Mình thích uống gì đó ngọt ngọt, không thích cà phê đắng" → {"positivePreferences": "ngọt", "negativePreferences": "cà phê đắng"}',
+    '    "Mình muốn tập gym tăng cơ" → {"positivePreferences": "tập gym, tăng cơ", "negativePreferences": ""}',
+    '    "Có gì thư giãn không?" → {"positivePreferences": "thư giãn", "negativePreferences": ""}',
     "- shop.name → {} — user hỏi tên quán",
     '  Example: "quán mình tên gì" → {}',
     "",
     "- shop.address → {} — user hỏi địa chỉ",
     '  Example: "quán mình ở đâu" → {}',
     "",
+    "- chat.compare → { items: [string, string] }",
+    "  User asks to compare 2 products/services.",
+    "  Extract the 2 product names from user message (exact names from knownProducts).",
+    '  Example: "so sánh cà phê sữa và bạc xỉu" → {"items": ["cà phê sữa", "bạc xỉu"]}',
     "- shop.opening_hours → {} — user hỏi giờ mở cửa",
     '  Example: "mấy giờ mở cửa" → {}',
     "",
     "- shop.phone → {} — user hỏi số điện thoại",
     "- shop.wifi → {} — user hỏi wifi / mật khẩu wifi",
-    "- shop.parking → {} — user hỏi gửi xe / đậu xe",
     "",
     "- cart.total → {} — CHỈ khi user hỏi TỔNG giỏ hàng, KHÔNG phải giá 1 món",
     '  Keywords: "tính tiền", "tổng tiền", "hoá đơn", "đơn mình"',
     '  KHÔNG dùng cart.total cho "quán mình tên gì" / "ở đâu" / "mấy giờ".',
     "",
-    "- chat.view_menu → {} — user hỏi menu / thực đơn",
-    "- chat.greeting → {} — user chào",
-    "- chat.faq → {} — câu hỏi chung (máy lạnh, mang đồ ăn ngoài, ...)",
-    "- chat.recommend → {} — user mô tả sở thích (thích ngọt, thích trà, ...)",
-    "- chat.compare → {} — user so sánh 2 món",
-    "- chat.unclear → {} — user hỏi chung chung (uống gì, tư vấn)",
-    "- chat.unknown → {} — không hiểu",
+    "- chat.ask_item_detail → { item: string }",
+    "  User asks for details / ingredients / characteristics of a product/service.",
+    '  The "item" value MUST be one of the product names from "knownProducts".',
+    "  Map typo, abbreviation, or accentless input to the correct product name.",
+    "  Examples:",
+    '    "cà phê sữa có vị như thế nào" → {"item": "cà phê sữa"}',
+    '    "massage đá nóng có gì" → {"item": "Massage đá nóng"}',
+    '    "gói giảm cân gồm gì" → {"item": "Gói giảm cân 3 tháng"}',
+    "- chat.view_menu → {}",
+    "  User asks to see the list of products/services offered by the business.",
+    "  Vocabulary varies by industry:",
+    "    Coffee: menu, thực đơn, đồ uống, có món gì, xem menu",
+    "    Gym: có gói tập nào, có dịch vụ gì, các gói tập, danh sách gói",
+    "    Spa: có dịch vụ gì, có liệu trình nào, các dịch vụ",
+    "    Retail: có sản phẩm gì, xem hàng, có gì bán",
+    "  → All map to intent = chat.view_menu.",
+    "- policy.query → {}",
+    "  User asks about business policies (return, payment, cancellation, etc.).",
+    "  Trigger words: chính sách, policy, quy định.",
     "",
     "Rules:",
     "- Use ONLY intent codes from the allowed list above.",

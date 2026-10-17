@@ -23,10 +23,15 @@ export type Cart = {
 
 const carts = new Map<string, Cart>();
 
-export function getCart(customerId: string): Cart {
-  return carts.get(customerId) ?? { items: [] };
+// Key duy nhất cho từng khách hàng tại từng Business
+function getKey(businessId: string, customerId: string) {
+  return `${businessId}_${customerId}`;
 }
 
-export function updateCart(customerId: string, cart: Cart) {
-  carts.set(customerId, cart);
+export function getCart(businessId: string, customerId: string): Cart {
+  return carts.get(getKey(businessId, customerId)) ?? { items: [] };
+}
+
+export function updateCart(businessId: string, customerId: string, cart: Cart) {
+carts.set(getKey(businessId, customerId), cart);
 }

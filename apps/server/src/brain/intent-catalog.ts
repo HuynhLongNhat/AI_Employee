@@ -24,7 +24,6 @@ export const INTENTS = [
   "shop.address",
   "shop.opening_hours",
   "shop.wifi",
-  "shop.parking",
   "shop.phone",
   "shop.name",
 
@@ -63,7 +62,7 @@ export const INTENTS = [
   "complaint.enter_content",
   "refund.intent",
   "refund.enter_reason",
-  "refund.policy_query",
+  "policy.query",
   "reservation.intent",
   "reservation.enter_details",
   "handoff.intent",
@@ -85,10 +84,7 @@ export const INTENTS = [
   "owner.view_conversation_logs",
 
   // ===== Knowledge admin =====
-  "admin.update_shop_info",
   "admin.view_knowledge",
-  "admin.update_price",
-  "admin.view_menu",
   "admin.update_promotion",
   "admin.view_promotions",
   "admin.view_refund_policy",
@@ -97,10 +93,6 @@ export const INTENTS = [
   "automation.run_remind_vip",
   "automation.view_logs",
 
-  // ===== Test tooling =====
-  "test.set_tier",
-  "test.set_points",
-  "test.set_role",
 ] as const;
 
 export type Intent = (typeof INTENTS)[number];

@@ -1,7 +1,9 @@
-'use client';
+"use client";
 
-import { useEffect, useState } from 'react';
-import { apiGet, apiPost } from '@/lib/api';
+import { useAuth } from "@clerk/nextjs";
+import { useEffect, useState } from "react";
+import { apiGet, apiPost } from "@/lib/api";
+import { useBusinessContext } from "@/lib/business-context";
 
 export type AiPermissions = {
   canAdvise: boolean;
@@ -17,9 +19,9 @@ export type AiConfigForm = {
 };
 
 const EMPTY: AiConfigForm = {
-  name: '',
-  role: 'consultant',
-  style: 'friendly',
+  name: "",
+  role: "consultant",
+  style: "friendly",
   permissions: {
     canAdvise: true,
     canPlaceOrder: true,
@@ -35,6 +37,9 @@ type AiConfigResponse = {
 };
 
 export function useAiConfig() {
+  const { isLoaded, isSignedIn } = useAuth();
+  const { activeId } = useBusinessContext();
+
   const [form, setForm] = useState<AiConfigForm>(EMPTY);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -43,15 +48,26 @@ export function useAiConfig() {
   const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
-    let cancelled = false;
+    if (!isLoaded) return;
+    if (!isSignedIn) {
+      queueMicrotask(() => setLoading(false));
+      return;
+    }
+    if (!activeId) return;
 
-    apiGet<AiConfigResponse>('/business-knowledge/ai-config')
+    let cancelled = false;
+    queueMicrotask(() => {
+      setLoading(true);
+      setError(null);
+    });
+
+    apiGet<AiConfigResponse>("/business-knowledge/ai-config")
       .then((data) => {
         if (cancelled) return;
         setForm({
-          name: data.name ?? '',
-          role: data.role ?? 'consultant',
-          style: data.style ?? 'friendly',
+          name: data.name ?? "",
+          role: data.role ?? "consultant",
+          style: data.style ?? "friendly",
           permissions: data.permissions ?? EMPTY.permissions,
         });
         setError(null);
@@ -59,35 +75,38 @@ export function useAiConfig() {
       })
       .catch((err) => {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : 'Load failed');
+        setError(err instanceof Error ? err.message : "Load failed");
         setLoading(false);
       });
 
     return () => {
       cancelled = true;
     };
-  }, [reloadKey]);
+  }, [activeId, isLoaded, isSignedIn, reloadKey]);
 
   async function save() {
     setSaving(true);
     setError(null);
     setSuccess(null);
     try {
-      await apiPost('/business-knowledge/ai-config', {
+      await apiPost("/business-knowledge/ai-config", {
         name: form.name,
         role: form.role,
         style: form.style,
         permissions: form.permissions,
       });
-      setSuccess('Đã lưu cấu hình.');
+      setSuccess("Đã lưu cấu hình.");
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Save failed');
+      setError(err instanceof Error ? err.message : "Save failed");
     } finally {
       setSaving(false);
     }
   }
 
-  function update<K extends keyof AiConfigForm>(key: K, value: AiConfigForm[K]) {
+  function update<K extends keyof AiConfigForm>(
+    key: K,
+    value: AiConfigForm[K],
+  ) {
     setForm((prev) => ({ ...prev, [key]: value }));
   }
 

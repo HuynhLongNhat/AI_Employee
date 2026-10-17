@@ -1,8 +1,21 @@
-import { Column, Entity, PrimaryColumn, UpdateDateColumn } from "typeorm";
+import {
+  Column,
+  Entity,
+  Index,
+  PrimaryGeneratedColumn,
+  UpdateDateColumn,
+} from "typeorm";
 
 @Entity("business_knowledge")
+@Index(["businessId", "knowledgeKey"], { unique: true })
 export class BusinessKnowledgeEntity {
-  @PrimaryColumn({ name: "key" })
+  @PrimaryGeneratedColumn("uuid")
+  id: string;
+
+  @Column({ type: "text" })
+  businessId: string;
+
+  @Column({ type: "text", name: "key" })
   knowledgeKey: string;
 
   @Column({ type: "text" })

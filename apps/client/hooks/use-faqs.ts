@@ -1,7 +1,9 @@
 'use client';
 
+import { useAuth } from '@clerk/nextjs';
 import { useCallback, useEffect, useState } from 'react';
 import { apiDelete, apiGet, apiPatch, apiPost } from '@/lib/api';
+import { useBusinessContext } from '@/lib/business-context';
 
 export type Faq = {
   id: string;
@@ -19,6 +21,8 @@ export type FaqInput = {
 };
 
 export function useFaqs() {
+  const { isLoaded, isSignedIn } = useAuth();
+  const { activeId } = useBusinessContext();
   const [items, setItems] = useState<Faq[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -27,7 +31,15 @@ export function useFaqs() {
   const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
+    if (!isLoaded) return;
+    if (!isSignedIn) {
+      queueMicrotask(() => setLoading(false));
+      return;
+    }
+    if (!activeId) return;
+
     let cancelled = false;
+    queueMicrotask(() => setLoading(true));
 
     apiGet<Faq[]>('/faqs')
       .then((data) => {
@@ -45,10 +57,9 @@ export function useFaqs() {
     return () => {
       cancelled = true;
     };
-  }, [reloadKey]);
+  }, [reloadKey, isLoaded, isSignedIn, activeId]);
 
   const reload = useCallback(() => {
-    setLoading(true);
     setReloadKey((k) => k + 1);
   }, []);
 

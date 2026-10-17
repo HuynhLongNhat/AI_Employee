@@ -5,6 +5,9 @@ import { BusinessKnowledgeModule } from "./knowledge/business-knowledge.module";
 import { ProductServiceModule } from "./product/product-service.module";
 import { PromotionModule } from "./promotion/promotion.module";
 import { FaqModule } from "./faq/faq.module";
+import { PolicyModule } from "./policy/policy.module";
+import { BusinessModule } from "./business/business.module";
+import { AuthModule } from "./auth/auth.module";
 @Controller()
 class AppController {
   @Get("hello")
@@ -21,10 +24,13 @@ class AppController {
       autoLoadEntities: true,
       synchronize: true,
     }),
+    AuthModule,
+    BusinessModule,
     BusinessKnowledgeModule,
     ProductServiceModule,
     PromotionModule,
-    FaqModule
+    FaqModule,
+    PolicyModule
   ],
   controllers: [AppController, ChatController],
 })

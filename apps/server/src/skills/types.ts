@@ -28,13 +28,13 @@ export type PromotionItem = {
   status: "active" | "inactive";
 };
 
-export type PolicyBundle = {
-  order: string | null;
-  delivery: string | null;
-  payment: string | null;
-  cancel: string | null;
-  refund: string | null;
+export type PolicyItem = {
+  id: string;
+  title: string;
+  content: string;
+  status: "active" | "inactive";
 };
+
 export type FaqItem = {
   id: string;
   question: string;
@@ -53,23 +53,54 @@ export type AiConfig = {
   } | null;
 };
 
+export type BusinessTerminology = {
+  businessTerm: string;
+  customerTerm: string;
+  productTerm: string;
+};
+
+export type BusinessContext = {
+  id: string;
+  name: string;
+  industry: string;
+  terminology: BusinessTerminology;
+  address: string;
+  phone: string;
+  openingHours: string;
+  wifiName: string;
+  wifiPassword: string;
+};
+
 export type SkillContext = {
   message: string;
   customerId: string;
   conversationId: string;
   customer: CustomerInfo;
   cart: Cart;
-  menu: MenuItem[];
   products: ProductServiceItem[];
   promotions: PromotionItem[];
-  policies: PolicyBundle;
+  policies: PolicyItem[];
   faqs: FaqItem[];
-  aiConfig: AiConfig; 
+  aiConfig: AiConfig;
+  business: BusinessContext;
+  role: "customer" | "staff" | "owner";
+  isAuthenticated: boolean;
 };
 
-export type SkillResult = { reply: string };
+export type SkillResult = {
+  reply: string;
+  suggestions?: string[];
+};
 
 export type BrainEntities = Record<string, string | number | boolean | null>;
+
+export type ProductAiAttributes = {
+  characteristics?: Record<string, string>;
+  suitableFor?: string[];
+  notSuitableFor?: string[];
+};
+
+export type ProductAttributes = Record<string, unknown>;
 
 export type ProductServiceItem = {
   id: string;
@@ -78,6 +109,7 @@ export type ProductServiceItem = {
   description: string;
   category: string;
   status: "active" | "inactive";
+ attributes: ProductAttributes | null;
 };
 
 export type SkillHandler = (

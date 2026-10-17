@@ -13,6 +13,9 @@ export class FaqEntity {
   @PrimaryGeneratedColumn("uuid")
   id: string;
 
+  @Column({ type: "text", nullable: true })
+  businessId: string | null;
+  
   @Column({ type: "text" })
   question: string;
 

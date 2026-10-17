@@ -14,6 +14,9 @@ export class PromotionEntity {
   @PrimaryGeneratedColumn("uuid")
   id: string;
 
+  @Column({ type: "text", nullable: true })
+  businessId: string | null
+  
   @Column({ type: "text" })
   name: string;
 

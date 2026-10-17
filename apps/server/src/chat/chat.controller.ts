@@ -1,12 +1,10 @@
-import { Body, Controller, Post } from "@nestjs/common";
+import { Body, Controller, Post, Headers } from "@nestjs/common";
 import { getCart } from "../memory/cart.memory";
-import { getEffectiveMenu } from "../knowledge/menu.override.memory";
 import {
   runHandlers,
   SkillContext,
   SkillHandler,
   SkillResult,
-  PolicyBundle,
 } from "../skills/types";
 import * as customerService from "../skills/customer-service.skill";
 import * as cartOrder from "../skills/cart-order.skill";
@@ -20,27 +18,25 @@ import { addMessage } from "../memory/chat.memory";
 import { brain } from "../brain/brain.instance";
 import { buildBrainInput } from "../brain/brain-input.builder";
 import { INTENT_HANDLERS } from "../brain/intent-handlers";
-import {
-  setOpeningHours,
-  setBusinessName,
-  setAddress,
-  setPhone,
-  setWifiName,
-  setWifiPassword,
-  setParking,
-} from "../knowledge/knowledge.override.memory";
 import { BusinessKnowledgeService } from "../knowledge/business-knowledge.service";
 const INTENT_HANDLER_MAP: Record<string, SkillHandler> = INTENT_HANDLERS;
 import { ProductServiceService } from "../product/product-service.service";
 import type {
-  AiConfig,
+  BusinessContext,
   FaqItem,
+  PolicyItem,
   ProductServiceItem,
   PromotionItem,
 } from "../skills/types";
 import { PromotionService } from "../promotion/promotion.service";
 import { FaqService } from "../faq/faq.service";
-
+import { PolicyService } from "../policy/policy.service";
+import { BusinessService } from "../business/business.service";
+import { BusinessEntity } from "../business/business.entity";
+import { enrich } from "./response-enricher";
+import { verifyToken } from "@clerk/backend";
+import { UserService } from "../auth/user.service";
+import { setRole } from "../memory/role.memory";
 @Controller("chat")
 export class ChatController {
   constructor(
@@ -48,56 +44,120 @@ export class ChatController {
     private readonly productService: ProductServiceService,
     private readonly promotionService: PromotionService,
     private readonly faqService: FaqService,
+    private readonly policyService: PolicyService,
+    private readonly businessService: BusinessService,
+    private readonly userService: UserService,
   ) {}
 
   @Post()
   async chat(
     @Body()
-    body: {
-      message: string;
-      conversationId: string;
-      customerId: string;
-    },
+    body: { message: string; conversationId: string; customerId: string },
+    @Headers("x-business-id") businessIdHeader?: string,
+    @Headers("authorization") authHeader?: string,
   ) {
-    const result = await this.chatInternal(body);
+    const result = await this.chatInternal(body, businessIdHeader, authHeader);
     logTurn(body.conversationId, body.customerId, body.message, result.reply);
     return result;
   }
 
-  private async chatInternal(body: {
-    message: string;
-    conversationId: string;
-    customerId: string;
-  }): Promise<SkillResult> {
+  private async chatInternal(
+    body: { message: string; conversationId: string; customerId: string },
+    businessIdHeader?: string,
+    authHeader?: string,
+  ): Promise<SkillResult> {
     const message = body.message.toLowerCase().trim();
     const customerId = body.customerId;
     const conversationId = body.conversationId;
-    const dbOpeningHours = await this.businessKnowledge.getOpeningHours();
-    if (dbOpeningHours !== null) {
-      setOpeningHours(dbOpeningHours);
+
+    // ===== 1. Resolve active business =====
+    let activeBusiness: BusinessEntity | null = null;
+
+    if (businessIdHeader) {
+      const candidate = await this.businessService.findOne(businessIdHeader);
+      if (candidate) activeBusiness = candidate;
     }
 
-    const dbBusinessName = await this.businessKnowledge.getBusinessName();
-    if (dbBusinessName !== null) {
-      setBusinessName(dbBusinessName);
+    if (!activeBusiness) {
+      activeBusiness = await this.businessService.getDefaultBusiness();
     }
 
-    const dbAddress = await this.businessKnowledge.getAddress();
-    if (dbAddress !== null) setAddress(dbAddress);
+    const businessId = activeBusiness?.id ?? "";
 
-    const dbPhone = await this.businessKnowledge.getPhone();
-    if (dbPhone !== null) setPhone(dbPhone);
+    // ===== Optional Clerk verification =====
+    let authenticatedUserId: string | null = null;
 
-    const dbWifiName = await this.businessKnowledge.getWifiName();
-    if (dbWifiName !== null) setWifiName(dbWifiName);
+    if (authHeader?.startsWith("Bearer ")) {
+      const token = authHeader.slice(7).trim();
+      try {
+        const payload = await verifyToken(token, {
+          secretKey: process.env.CLERK_SECRET_KEY!,
+        });
+        authenticatedUserId = payload.sub;
+      } catch {
+        // Invalid/expired token → treat as guest
+      }
+    }
 
-    const dbWifiPassword = await this.businessKnowledge.getWifiPassword();
-    if (dbWifiPassword !== null) setWifiPassword(dbWifiPassword);
+    // ===== Determine role =====
+    let role: "customer" | "staff" | "owner" = "customer";
 
-    const dbParking = await this.businessKnowledge.getParking();
-    if (dbParking !== null) setParking(dbParking);
+    if (authenticatedUserId) {
+      const internalUser = await this.userService.getOrCreate(
+        authenticatedUserId,
+        null,
+      );
+      if (activeBusiness && activeBusiness.ownerUserId === internalUser.id) {
+        role = "owner";
+      }
+    }
 
-    const productsRaw = await this.productService.findAllActive();
+    setRole(customerId, role);
+
+    const isAuthenticated = authenticatedUserId !== null;
+    // ===== 2. Load business knowledge =====
+    const [
+      profile,
+      businessNameRes,
+      aiConfig,
+      addressRes,
+      phoneRes,
+      hoursRes,
+      wifiNameRes,
+      wifiPassRes,
+    ] = businessId
+      ? await Promise.all([
+          this.businessKnowledge.getBusinessProfile(businessId),
+          this.businessKnowledge.getBusinessName(businessId),
+          this.businessKnowledge.getAiConfig(businessId),
+          this.businessKnowledge.getAddress(businessId),
+          this.businessKnowledge.getPhone(businessId),
+          this.businessKnowledge.getOpeningHours(businessId),
+          this.businessKnowledge.getWifiName(businessId),
+          this.businessKnowledge.getWifiPassword(businessId),
+        ])
+      : [
+          {
+            industry: null,
+            terminology: {
+              businessTerm: null,
+              customerTerm: null,
+              productTerm: null,
+            },
+          },
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+        ];
+    // ===== 3. Load products / promotions / faqs / policies =====
+    const productsRaw = activeBusiness
+      ? await this.productService.findAllActive(activeBusiness.id)
+      : [];
+
     const products: ProductServiceItem[] = productsRaw.map((p) => ({
       id: p.id,
       name: p.name,
@@ -105,9 +165,13 @@ export class ChatController {
       description: p.description,
       category: p.category,
       status: p.status,
+      attributes: p.attributes ?? null,
     }));
 
-    const promotionsRaw = await this.promotionService.findAllActive();
+    const promotionsRaw = activeBusiness
+      ? await this.promotionService.findAllActive(activeBusiness.id)
+      : [];
+
     const promotions: PromotionItem[] = promotionsRaw.map((p) => ({
       id: p.id,
       name: p.name,
@@ -120,9 +184,10 @@ export class ChatController {
       status: p.status,
     }));
 
-    const policies: PolicyBundle = await this.businessKnowledge.getPolicies();
+    const faqsRaw = activeBusiness
+      ? await this.faqService.findAllActive(activeBusiness.id)
+      : [];
 
-    const faqsRaw = await this.faqService.findAllActive();
     const faqs: FaqItem[] = faqsRaw.map((f) => ({
       id: f.id,
       question: f.question,
@@ -130,22 +195,56 @@ export class ChatController {
       status: f.status,
     }));
 
-    const aiConfig: AiConfig = await this.businessKnowledge.getAiConfig();
+    const policiesRaw = activeBusiness
+      ? await this.policyService.findAllActive(activeBusiness.id)
+      : [];
 
+    const policies: PolicyItem[] = policiesRaw.map((p) => ({
+      id: p.id,
+      title: p.title,
+      content: p.content,
+      status: p.status,
+    }));
+
+    // ===== 4. Build BusinessContext =====
+    const businessCtx: BusinessContext = {
+      id: activeBusiness?.id ?? "default",
+      name: activeBusiness?.name ?? businessNameRes ?? "",
+      industry: activeBusiness?.industry || (profile.industry ?? ""),
+      terminology: {
+        businessTerm: profile.terminology.businessTerm ?? "",
+        customerTerm: profile.terminology.customerTerm ?? "",
+        productTerm: profile.terminology.productTerm ?? "",
+      },
+      address: addressRes ?? "",
+      phone: phoneRes ?? "",
+      openingHours: hoursRes ?? "",
+      wifiName: wifiNameRes ?? "",
+      wifiPassword: wifiPassRes ?? "",
+    };
+    // ===== 5. Build SkillContext =====
     const ctx: SkillContext = {
       message,
       customerId,
       conversationId,
       customer: getCustomer(customerId),
-      cart: getCart(customerId),
-      menu: getEffectiveMenu(),
+     cart: getCart(activeBusiness?.id ?? "default", customerId),
       products,
       promotions,
       policies,
       faqs,
-      aiConfig,
+      aiConfig: aiConfig ?? {
+        name: null,
+        role: null,
+        style: null,
+        permissions: null,
+      },
+      role,
+      isAuthenticated,
+      business: businessCtx,
     };
 
+    // ===== 6. Dispatch beforeAddMessage =====
     const beforeAddMessage: SkillHandler[] = [
       cartOrder.tryAwaitingConfirm,
       cartOrder.tryPendingFulfillment,
@@ -170,14 +269,8 @@ export class ChatController {
       ownerOps.tryTierUpgrade,
       automation.tryRunAutomation,
       automation.tryViewAutomationLogs,
-      ownerOps.trySetTier,
-      ownerOps.trySetPoints,
-      ownerOps.tryRoleCommand,
       ownerOps.tryViewAllOrders,
-      knowledgeAdmin.tryKnowledgeOverrideCommand,
       knowledgeAdmin.tryViewKnowledge,
-      knowledgeAdmin.trySetPrice,
-      knowledgeAdmin.tryViewMenu,
       knowledgeAdmin.tryViewPromotions,
       knowledgeAdmin.tryViewRefundPolicy,
       ownerOps.tryViewLogs,
@@ -185,7 +278,6 @@ export class ChatController {
       customerCare.tryHistory,
       customerCare.tryRegular,
       customerCare.tryComplaintIntent,
-      customerService.tryRefundPolicyQuery,
       customerCare.tryHandoffIntent,
       customerCare.tryHandoffBlock,
       cartOrder.tryEditAddressIntent,
@@ -207,11 +299,11 @@ export class ChatController {
     ];
 
     const beforeResult = runHandlers(beforeAddMessage, ctx);
-    if (beforeResult) return beforeResult;
+    if (beforeResult) return enrich(beforeResult, ctx);
 
     addMessage(conversationId, message);
 
-    // ===== Brain integration =====
+    // ===== 7. Brain integration =====
     const brainInput = buildBrainInput(ctx);
     const brainOutput = await brain.interpret(brainInput);
 
@@ -219,10 +311,11 @@ export class ChatController {
       const handler = INTENT_HANDLER_MAP[brainOutput.intent];
       if (handler) {
         const brainResult = handler(ctx, brainOutput.entities);
-        if (brainResult) return brainResult;
+        if (brainResult) return enrich(brainResult, ctx);
       }
     }
 
+    // ===== 8. Dispatch afterAddMessage =====
     const afterAddMessage: SkillHandler[] = [
       customerService.tryGreeting,
       customerService.tryMenuView,
@@ -230,7 +323,6 @@ export class ChatController {
       customerService.tryAddress,
       customerService.tryOpeningHours,
       customerService.tryWifi,
-      customerService.tryParking,
       customerService.tryPhone,
       customerService.tryPriceQuestion,
       customerService.tryDetailQuestion,
@@ -241,8 +333,8 @@ export class ChatController {
     ];
 
     const afterResult = runHandlers(afterAddMessage, ctx);
-    if (afterResult) return afterResult;
+    if (afterResult) return enrich(afterResult, ctx);
 
-    return customerService.tryFallback(ctx);
+    return enrich(customerService.tryFallback(ctx), ctx);
   }
 }
