@@ -18,6 +18,7 @@ export const api = axios.create({
   baseURL: API_URL,
   headers: { "Content-Type": "application/json" },
   timeout: 15000,
+  withCredentials: true,
 });
 
 api.interceptors.request.use(async (config) => {
@@ -30,7 +31,8 @@ api.interceptors.request.use(async (config) => {
     }
   }
 
-  if (activeBusinessId) {
+  // CHỈ GẮN BIẾN TOÀN CỤC NẾU REQUEST ĐÓ CHƯA CÓ HEADER X-BUSINESS-ID
+  if (activeBusinessId && !config.headers["X-Business-Id"]) {
     config.headers["X-Business-Id"] = activeBusinessId;
   }
 

@@ -4,7 +4,6 @@ import {
   formatTier,
   formatOrderStatus,
   formatNameSuffix,
-  formatDateTime,
 } from "../common/format";
 import {
   OWNER_ONLY_REPLY,
@@ -15,16 +14,12 @@ import {
   TIER_UPGRADE_THRESHOLDS,
   getNextTier,
 } from "../knowledge/coffee.rules";
-import { getAllCustomers, getCustomer } from "../memory/customer.memory";
-import { getMembership, updateMembership } from "../memory/membership.memory";
-import {
-  getAllOrders,
-  getOrdersByCustomer,
-  sumOrderTotals,
-  isActiveOrder,
-} from "../memory/order.memory";
-import { getRecentLogs } from "../memory/conversation.log.memory";
 import type { SkillContext, SkillResult } from "./types";
+import type { OrderEntity } from "../order/order.entity";
+
+// Helper: Thay thế cho sumOrderTotals và isActiveOrder bị xóa
+const isActiveOrder = (o: OrderEntity) => o.status !== "cancelled";
+const sumOrderTotals = (orders: OrderEntity[]) => orders.reduce((sum, o) => sum + o.total, 0);
 
 export function tryViewAllOrders(ctx: SkillContext): SkillResult | null {
   const m = ctx.message;
@@ -40,7 +35,7 @@ export function tryViewAllOrders(ctx: SkillContext): SkillResult | null {
   if (!isOwnerOrStaff(ctx.customerId))
     return { reply: OWNER_OR_STAFF_ONLY_REPLY };
 
-  const orders = getAllOrders();
+  const orders = ctx.allOrders; // Đọc từ Context thay vì Memory
 
   if (orders.length === 0) return { reply: "Dạ, hiện tại chưa có đơn nào ạ." };
 
@@ -71,8 +66,8 @@ export function tryOrderFilter(ctx: SkillContext): SkillResult | null {
   if (!isOwnerOrStaff(ctx.customerId))
     return { reply: OWNER_OR_STAFF_ONLY_REPLY };
 
-  const orders = getAllOrders().filter((o) => o.status === orderFilter);
-  const label = formatOrderStatus(orderFilter);
+  const orders = ctx.allOrders.filter((o) => o.status === orderFilter);
+  const label = formatOrderStatus(orderFilter as any);
 
   if (orders.length === 0) {
     return { reply: `Dạ, không có đơn ${label} ạ.` };
@@ -97,13 +92,13 @@ export function tryCustomerList(ctx: SkillContext): SkillResult | null {
   if (!isOwnerOrStaff(ctx.customerId))
     return { reply: OWNER_OR_STAFF_ONLY_REPLY };
 
-  const allCustomers = getAllCustomers();
+  const allCustomers = ctx.allCustomers;
 
   if (allCustomers.length === 0)
     return { reply: "Dạ, hiện tại chưa có khách hàng nào ạ." };
 
   const lines = allCustomers.map(
-    (c, i) => `${i + 1}. ${c.customerId}${formatNameSuffix(c.name)}`,
+    (c, i) => `${i + 1}. ${c.customerId}${formatNameSuffix(c.name ?? undefined)}`,
   );
 
   return {
@@ -119,23 +114,21 @@ export function tryCustomerDetail(ctx: SkillContext): SkillResult | null {
     return { reply: OWNER_OR_STAFF_ONLY_REPLY };
 
   const targetId = viewCustomerMatch[1].trim();
-  const allCustomers = getAllCustomers();
-  const exists = allCustomers.some((c) => c.customerId === targetId);
+  const allCustomers = ctx.allCustomers;
+  const target = allCustomers.find((c) => c.customerId === targetId);
 
-  if (!exists) {
+  if (!target) {
     return { reply: `Dạ, em không tìm thấy khách "${targetId}" ạ.` };
   }
 
-  const target = getCustomer(targetId);
-  const membership = getMembership(targetId);
-  const orders = getOrdersByCustomer(targetId).filter(isActiveOrder);
-
+  // Đọc trực tiếp từ object customer
+  const orders = ctx.allOrders.filter((o) => o.customerId === targetId && o.status !== "cancelled");
   const totalSpent = sumOrderTotals(orders);
-  const tierText = formatTier(membership.tier);
+  const tierText = formatTier(target.tier);
   const nameText = target.name ? target.name : "(chưa đặt tên)";
 
   return {
-    reply: `Dạ, thông tin khách ${targetId}:\nTên: ${nameText}\nHạng: ${tierText}\nĐiểm: ${membership.points}\nSố đơn: ${orders.length}\nTổng chi tiêu: ${formatPrice(totalSpent)}`,
+    reply: `Dạ, thông tin khách ${targetId}:\nTên: ${nameText}\nHạng: ${tierText}\nĐiểm: ${target.points}\nSố đơn: ${orders.length}\nTổng chi tiêu: ${formatPrice(totalSpent)}`,
   };
 }
 
@@ -151,7 +144,7 @@ export function tryRevenue(ctx: SkillContext): SkillResult | null {
   if (!isOwner(ctx.customerId)) return { reply: OWNER_ONLY_REPLY };
 
   const today = new Date().toDateString();
-  const todayOrders = getAllOrders().filter(
+  const todayOrders = ctx.allOrders.filter(
     (o) => new Date(o.createdAt).toDateString() === today,
   );
   const confirmed = todayOrders.filter((o) => o.status === "confirmed");
@@ -183,7 +176,7 @@ export function tryBestSeller(ctx: SkillContext): SkillResult | null {
 
   if (!isOwner(ctx.customerId)) return { reply: OWNER_ONLY_REPLY };
 
-  const orders = getAllOrders().filter(isActiveOrder);
+  const orders = ctx.allOrders.filter(isActiveOrder);
   const counts = new Map<string, number>();
 
   for (const order of orders) {
@@ -221,7 +214,7 @@ export function tryTopCustomers(ctx: SkillContext): SkillResult | null {
 
   if (!isOwner(ctx.customerId)) return { reply: OWNER_ONLY_REPLY };
 
-  const orders = getAllOrders().filter(isActiveOrder);
+  const orders = ctx.allOrders.filter(isActiveOrder);
   const stats = new Map<string, { orderCount: number; totalSpent: number }>();
 
   for (const order of orders) {
@@ -242,8 +235,8 @@ export function tryTopCustomers(ctx: SkillContext): SkillResult | null {
     .slice(0, 3);
 
   const lines = ranked.map(([cid, s], i) => {
-    const name = getCustomer(cid).name;
-    return `${i + 1}. ${cid}${formatNameSuffix(name)} — ${s.orderCount} đơn — ${formatPrice(s.totalSpent)}`;
+    const customer = ctx.allCustomers.find((c) => c.customerId === cid);
+    return `${i + 1}. ${cid}${formatNameSuffix(customer?.name ?? undefined)} — ${s.orderCount} đơn — ${formatPrice(s.totalSpent)}`;
   });
 
   return {
@@ -264,7 +257,7 @@ export function tryClassification(ctx: SkillContext): SkillResult | null {
 
   if (!isOwner(ctx.customerId)) return { reply: OWNER_ONLY_REPLY };
 
-  const orders = getAllOrders().filter(isActiveOrder);
+  const orders = ctx.allOrders.filter(isActiveOrder);
   const orderCountByCustomer = new Map<string, number>();
 
   for (const order of orders) {
@@ -284,7 +277,7 @@ export function tryClassification(ctx: SkillContext): SkillResult | null {
     else if (count >= 5) vipCount += 1;
   }
 
-  const totalCustomers = getAllCustomers().length;
+  const totalCustomers = ctx.allCustomers.length;
 
   return {
     reply: `Dạ, phân loại khách hàng của ${businessName}:\n\n- Khách mới (1 đơn): ${newCount} khách\n- Khách quen (2–4 đơn): ${regularCount} khách\n- Khách VIP (≥ 5 đơn): ${vipCount} khách\n\nTổng: ${totalCustomers} khách hàng.`,
@@ -306,13 +299,13 @@ export function tryTierDistribution(ctx: SkillContext): SkillResult | null {
 
   if (!isOwner(ctx.customerId)) return { reply: OWNER_ONLY_REPLY };
 
-  const allCustomers = getAllCustomers();
+  const allCustomers = ctx.allCustomers;
   let bronze = 0;
   let silver = 0;
   let gold = 0;
 
   for (const c of allCustomers) {
-    const tier = getMembership(c.customerId).tier;
+    const tier = c.tier; // Đọc trực tiếp
     if (tier === "bronze") bronze += 1;
     else if (tier === "silver") silver += 1;
     else if (tier === "gold") gold += 1;
@@ -336,7 +329,7 @@ export function tryOrderDistribution(ctx: SkillContext): SkillResult | null {
 
   if (!isOwner(ctx.customerId)) return { reply: OWNER_ONLY_REPLY };
 
-  const orders = getAllOrders();
+  const orders = ctx.allOrders;
   const pending = orders.filter((o) => o.status === "pending").length;
   const confirmed = orders.filter((o) => o.status === "confirmed").length;
   const cancelled = orders.filter((o) => o.status === "cancelled").length;
@@ -360,7 +353,7 @@ export function tryAov(ctx: SkillContext): SkillResult | null {
 
   if (!isOwner(ctx.customerId)) return { reply: OWNER_ONLY_REPLY };
 
-  const confirmedOrders = getAllOrders().filter(
+  const confirmedOrders = ctx.allOrders.filter(
     (o) => o.status === "confirmed",
   );
 
@@ -389,13 +382,13 @@ export function tryCareSuggestions(ctx: SkillContext): SkillResult | null {
 
   if (!isOwner(ctx.customerId)) return { reply: OWNER_ONLY_REPLY };
 
-  const allCustomers = getAllCustomers();
+  const allCustomers = ctx.allCustomers;
   const today = new Date();
   const oneDayMs = 24 * 60 * 60 * 1000;
 
   type Candidate = {
     customerId: string;
-    name?: string;
+    name?: string | null;
     orderCount: number;
     tier: string;
     daysSinceLastOrder: number;
@@ -404,11 +397,10 @@ export function tryCareSuggestions(ctx: SkillContext): SkillResult | null {
   const candidates: Candidate[] = [];
 
   for (const c of allCustomers) {
-    const orders = getOrdersByCustomer(c.customerId).filter(isActiveOrder);
+    const orders = ctx.allOrders.filter(o => o.customerId === c.customerId && o.status !== "cancelled");
     if (orders.length === 0) continue;
 
-    const membership = getMembership(c.customerId);
-    if (!isVipCustomer(orders.length, membership.tier)) continue;
+    if (!isVipCustomer(orders.length, c.tier)) continue;
 
     const lastOrderAt = new Date(orders[0].createdAt);
     const daysSinceLastOrder = Math.floor(
@@ -419,7 +411,7 @@ export function tryCareSuggestions(ctx: SkillContext): SkillResult | null {
       customerId: c.customerId,
       name: c.name,
       orderCount: orders.length,
-      tier: membership.tier,
+      tier: c.tier,
       daysSinceLastOrder,
     });
   }
@@ -433,7 +425,7 @@ export function tryCareSuggestions(ctx: SkillContext): SkillResult | null {
 
   const lines = top.map((c, i) => {
     const tierText = formatTier(c.tier as "bronze" | "silver" | "gold");
-    return `${i + 1}. ${c.customerId}${formatNameSuffix(c.name)} — ${c.orderCount} đơn — ${tierText} — lần cuối ${c.daysSinceLastOrder} ngày trước`;
+    return `${i + 1}. ${c.customerId}${formatNameSuffix(c.name ?? undefined)} — ${c.orderCount} đơn — ${tierText} — lần cuối ${c.daysSinceLastOrder} ngày trước`;
   });
 
   return {
@@ -454,11 +446,11 @@ export function tryTierUpgrade(ctx: SkillContext): SkillResult | null {
 
   if (!isOwner(ctx.customerId)) return { reply: OWNER_ONLY_REPLY };
 
-  const allCustomers = getAllCustomers();
+  const allCustomers = ctx.allCustomers;
 
   type Candidate = {
     customerId: string;
-    name?: string;
+    name?: string | null;
     tier: string;
     orderCount: number;
     needed: number;
@@ -468,25 +460,25 @@ export function tryTierUpgrade(ctx: SkillContext): SkillResult | null {
   const candidates: Candidate[] = [];
 
   for (const c of allCustomers) {
-    const membership = getMembership(c.customerId);
-    if (membership.tier === "gold") continue;
+    if (c.tier === "gold") continue;
 
-    const threshold = TIER_UPGRADE_THRESHOLDS[membership.tier];
+    const threshold = TIER_UPGRADE_THRESHOLDS[c.tier];
     if (threshold === undefined) continue;
 
-    const orderCount = getOrdersByCustomer(c.customerId).filter(
-      isActiveOrder,
+    const orderCount = ctx.allOrders.filter(
+      o => o.customerId === c.customerId && o.status !== "cancelled"
     ).length;
+    
     const needed = threshold - orderCount;
 
     if (needed === 1) {
       candidates.push({
         customerId: c.customerId,
         name: c.name,
-        tier: membership.tier,
+        tier: c.tier,
         orderCount,
         needed,
-        nextTier: getNextTier(membership.tier),
+        nextTier: getNextTier(c.tier as any),
       });
     }
   }
@@ -499,40 +491,10 @@ export function tryTierUpgrade(ctx: SkillContext): SkillResult | null {
 
   const lines = candidates.map((c, i) => {
     const tierText = formatTier(c.tier as "bronze" | "silver" | "gold");
-    return `${i + 1}. ${c.customerId}${formatNameSuffix(c.name)} — ${tierText} — ${c.orderCount} đơn — cần ${c.needed} đơn nữa để lên ${c.nextTier}`;
+    return `${i + 1}. ${c.customerId}${formatNameSuffix(c.name ?? undefined)} — ${tierText} — ${c.orderCount} đơn — cần ${c.needed} đơn nữa để lên ${c.nextTier}`;
   });
 
   return {
     reply: `Dạ, khách sắp lên hạng tại ${businessName}:\n\n${lines.join("\n")}\n\nMình có thể gửi tin nhắn khích lệ để khách hoàn tất ạ.`,
   };
 }
-
-export function tryViewLogs(ctx: SkillContext): SkillResult | null {
-  const m = ctx.message;
-
-  if (
-    !m.includes("xem logs") &&
-    !m.includes("xem log") &&
-    !m.includes("lịch sử chat") &&
-    !m.includes("xem conversation")
-  ) {
-    return null;
-  }
-
-  if (!isOwner(ctx.customerId)) return { reply: OWNER_ONLY_REPLY };
-
-  const logs = getRecentLogs(10);
-
-  if (logs.length === 0)
-    return { reply: "Dạ, hiện tại chưa có log cuộc trò chuyện nào ạ." };
-
-  const lines = logs.map((log, i) => {
-    const time = formatDateTime(log.createdAt);
-    return `${i + 1}. [${time}] ${log.customerId} (${log.conversationId})\n   Khách: ${log.message}\n   AI: ${log.reply}`;
-  });
-
-  return {
-    reply: `Dạ, ${logs.length} lượt chat gần nhất:\n\n${lines.join("\n\n")}`,
-  };
-}
-

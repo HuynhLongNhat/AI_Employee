@@ -1,47 +1,43 @@
-"use client";
+import { redirect } from "next/navigation";
+import { ChatUI } from "@/components/chat-ui"; 
+import { apiGet } from "@/lib/api"; 
 
-import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
-import { Loader2 } from "lucide-react";
-import { ChatUI } from "@/components/chat-ui";
-import { API_URL } from "@/lib/api";
+type Business = {
+  id: string;
+  name: string;
+  slug: string;
+};
 
-export default function PublicChatPage() {
-  const params = useParams();
-  const slug = params.slug as string;
+// 1. Sửa type của params thành Promise
+export default async function ChatPage({ params }: { params: Promise<{ slug: string }> }) {
+  let business: Business | null = null;
 
-  const [business, setBusiness] = useState<{ id: string; name: string } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  // 2. Phải await params ra trước khi dùng
+  const resolvedParams = await params;
+  const slug = resolvedParams.slug;
 
-  useEffect(() => {
-    if (!slug) return;
-    fetch(`${API_URL}/businesses/public/${slug}`)
-      .then((res) => {
-        if (!res.ok) throw new Error("Không tìm thấy doanh nghiệp này.");
-        return res.json();
-      })
-      .then((data) => {
-        setBusiness({ id: data.id, name: data.name });
-        setLoading(false);
-      })
-      .catch((err) => {
-        setError(err.message);
-        setLoading(false);
-      });
-  }, [slug]);
-
-  if (loading) {
-    return <div className="flex min-h-screen items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-amber-600" /></div>;
+  try {
+    console.log(`⏳ Đang gọi API lấy business theo slug: ${slug}`);
+    
+    business = await apiGet<Business>(`/businesses/public/${slug}`);
+    
+    console.log(`✅ Dữ liệu Business nhận được:`, business);
+  } catch (error) {
+    console.error(`❌ Lỗi API lấy business:`, error);
   }
 
-  if (error || !business) {
-    return <div className="flex min-h-screen items-center justify-center text-red-500 font-medium">{error || "Có lỗi xảy ra"}</div>;
+  // NẾU KHÔNG TÌM THẤY BOT -> ĐÁ VỀ TRANG CHỦ
+  if (!business || !business.id) {
+    console.log("🛑 Business không tồn tại. Đá về trang chủ!");
+    redirect("/"); 
   }
 
   return (
-    <div className="min-h-screen bg-stone-50 p-4">
-      <ChatUI businessId={business.id} businessName={business.name} />
+    <div className="min-h-screen bg-stone-50 py-10">
+      <ChatUI 
+        businessId={business.id} 
+        businessName={business.name} 
+      />
     </div>
   );
 }

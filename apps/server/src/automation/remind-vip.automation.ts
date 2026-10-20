@@ -1,15 +1,17 @@
-import { getAllCustomers } from '../memory/customer.memory';
-import { getOrdersByCustomer } from '../memory/order.memory';
-import { getMembership } from '../memory/membership.memory';
 import { isVipCustomer } from "../knowledge/coffee.rules";
-export function runRemindVipAutomation(): string {
-  const allCustomers = getAllCustomers();
+import { CustomerEntity } from "../customer/customer.entity";
+import { OrderEntity } from "../order/order.entity";
+
+export function runRemindVipAutomation(
+  allCustomers: CustomerEntity[],
+  allOrders: OrderEntity[],
+): string {
   const today = new Date();
   const oneDayMs = 24 * 60 * 60 * 1000;
 
   type Candidate = {
     customerId: string;
-    name?: string;
+    name?: string | null;
     orderCount: number;
     tier: string;
     daysSinceLastOrder: number;
@@ -18,14 +20,13 @@ export function runRemindVipAutomation(): string {
   const candidates: Candidate[] = [];
 
   for (const c of allCustomers) {
-    const orders = getOrdersByCustomer(c.customerId).filter(
-      (o) => o.status !== 'cancelled',
-    );
+    // Lấy orders từ tham số truyền vào
+    const orders = allOrders
+      .filter((o) => o.customerId === c.customerId && o.status !== "cancelled");
 
     if (orders.length === 0) continue;
 
-    const membership = getMembership(c.customerId);
-    const isVip = isVipCustomer(orders.length, membership.tier);
+    const isVip = isVipCustomer(orders.length, c.tier);
 
     if (!isVip) continue;
 
@@ -38,25 +39,22 @@ export function runRemindVipAutomation(): string {
       customerId: c.customerId,
       name: c.name,
       orderCount: orders.length,
-      tier: membership.tier,
+      tier: c.tier,
       daysSinceLastOrder,
     });
   }
 
   if (candidates.length === 0) {
-    return 'Không có khách VIP nào cần chăm sóc.';
+    return "Không có khách VIP nào cần chăm sóc.";
   }
 
-  candidates.sort(
-    (a, b) => b.daysSinceLastOrder - a.daysSinceLastOrder,
-  );
-
+  candidates.sort((a, b) => b.daysSinceLastOrder - a.daysSinceLastOrder);
   const top = candidates.slice(0, 5);
 
   const lines = top.map((c) => {
-    const nameText = c.name ? ` (${c.name})` : '';
+    const nameText = c.name ? ` (${c.name})` : "";
     return `- ${c.customerId}${nameText} — ${c.daysSinceLastOrder} ngày trước`;
   });
 
-  return `${top.length} khách VIP cần chăm sóc:\n${lines.join('\n')}`;
+  return `${top.length} khách VIP cần chăm sóc:\n${lines.join("\n")}`;
 }

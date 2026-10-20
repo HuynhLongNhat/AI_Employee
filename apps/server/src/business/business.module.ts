@@ -4,11 +4,13 @@ import { BusinessEntity } from "./business.entity";
 import { BusinessService } from "./business.service";
 import { BusinessController } from "./business.controller";
 import { AuthModule } from "../auth/auth.module";
+import { ProductServiceEntity } from "../product/product-service.entity"; // Lưu ý check lại đường dẫn
 import { PromotionEntity } from "../promotion/promotion.entity";
 import { FaqEntity } from "../faq/faq.entity";
 import { PolicyEntity } from "../policy/policy.entity";
-import { ProductServiceEntity } from "../product/product-service.entity";
-import { BusinessKnowledgeEntity } from "../knowledge/business-knowledge.entity";
+// THÊM 2 IMPORT NÀY
+import { ConversationLogEntity } from "../chat/conversation-log.entity";
+import { ConversationLogService } from "../chat/conversation-log.service";
 
 @Module({
   imports: [
@@ -18,12 +20,15 @@ import { BusinessKnowledgeEntity } from "../knowledge/business-knowledge.entity"
       PromotionEntity,
       FaqEntity,
       PolicyEntity,
-      BusinessKnowledgeEntity
+      ConversationLogEntity, // THÊM DÒNG NÀY
     ]),
     AuthModule,
   ],
-  providers: [BusinessService],
+  providers: [
+    BusinessService,
+    ConversationLogService, // THÊM DÒNG NÀY
+  ],
   controllers: [BusinessController],
-  exports: [BusinessService],
+  exports: [BusinessService, ConversationLogService], // THÊM ConversationLogService vào đây
 })
 export class BusinessModule {}

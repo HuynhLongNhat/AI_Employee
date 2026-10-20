@@ -81,7 +81,6 @@ export const INTENTS = [
   "owner.aov",
   "owner.care_suggestions",
   "owner.tier_upgrade_candidates",
-  "owner.view_conversation_logs",
 
   // ===== Knowledge admin =====
   "admin.view_knowledge",
@@ -91,7 +90,6 @@ export const INTENTS = [
 
   // ===== Automation =====
   "automation.run_remind_vip",
-  "automation.view_logs",
 
 ] as const;
 

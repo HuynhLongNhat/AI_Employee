@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { UserButton } from '@clerk/nextjs';
 import { useBusinessContext } from '@/lib/business-context';
-import { Bot, Store, Package, Tag, FileText, HelpCircle, Cpu, MessageSquare  } from 'lucide-react';
+import { Bot, Store, Package, Tag, FileText, HelpCircle, Cpu, MessageSquare, Inbox  } from 'lucide-react';
 
 const NAV = [{ href: '/dashboard', label: 'Danh sách Bot', icon: Bot }];
 
@@ -15,7 +15,8 @@ const BOT_NAV = [
   { href: '/dashboard/policies', label: 'Chính sách', icon: FileText },
   { href: '/dashboard/faq', label: 'FAQ / Knowledge', icon: HelpCircle },
   { href: '/dashboard/ai', label: 'AI Employee', icon: Cpu },
-  { href: '/dashboard/test-chat', label: 'Test Chat', icon: MessageSquare }, // ← THÊM DÒNG NÀY
+  { href: '/dashboard/test-chat', label: 'Test Chat', icon: MessageSquare },
+  { href: '/dashboard/inbox', label: 'Hộp thư (Inbox)', icon: Inbox },// ← THÊM DÒNG NÀY
 ];
 
 export function OwnerSidebar() {

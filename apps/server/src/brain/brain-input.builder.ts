@@ -1,8 +1,5 @@
-
 import type { BrainInput } from "./brain.contract";
 import type { SkillContext } from "../skills/types";
-import { getRole } from "../memory/role.memory";
-import { getMembership } from "../memory/membership.memory";
 import { getConversation } from "../memory/chat.memory";
 
 export function buildBrainInput(ctx: SkillContext): BrainInput {
@@ -10,9 +7,13 @@ export function buildBrainInput(ctx: SkillContext): BrainInput {
     message: ctx.message,
     conversationId: ctx.conversationId,
     customerId: ctx.customerId,
-    role: getRole(ctx.customerId),
-    customerName: ctx.customer.name,
-    membershipTier: getMembership(ctx.customerId).tier,
+    // THAY ĐỔI 1: Lấy role trực tiếp từ ctx
+    role: ctx.role, 
+    // THAY ĐỔI 2: Lấy name từ ctx.customer
+    customerName: ctx.customer.name ?? undefined, 
+    // THAY ĐỔI 3: Lấy tier trực tiếp từ ctx.customer
+    membershipTier: ctx.customer.tier, 
+    
     hasAwaitingConfirm: !!ctx.cart.awaitingConfirm,
     hasPendingOrderId: !!ctx.cart.pendingOrderId,
     hasPendingPaymentOrderId: !!ctx.cart.pendingPaymentOrderId,

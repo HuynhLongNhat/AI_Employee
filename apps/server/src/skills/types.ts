@@ -1,4 +1,29 @@
-import type { Cart } from "../memory/cart.memory";
+import { CustomerEntity } from "../customer/customer.entity";
+import { OrderEntity } from "../order/order.entity";
+
+// Định nghĩa lại cấu trúc Cart (vì đã chuyển sang lưu DB dạng JSON)
+export type CartItem = {
+  name: string;
+  quantity: number;
+  note?: string;
+};
+
+export type Cart = {
+  items: CartItem[];
+  awaitingConfirm?: boolean;
+  pendingOrderId?: string;
+  pendingPaymentOrderId?: string;
+  pendingCancelOrderId?: string;
+  pendingEditAddressOrderId?: string;
+  pendingReservation?: {
+    people?: number;
+    time?: string;
+  };
+  pendingComplaint?: boolean;
+  pendingRefund?: boolean;
+  handoffRequested?: boolean;
+  handoffId?: string;
+};
 
 export type MenuItem = {
   name: string;
@@ -75,7 +100,8 @@ export type SkillContext = {
   message: string;
   customerId: string;
   conversationId: string;
-  customer: CustomerInfo;
+  customer: CustomerEntity;
+  allCustomers: CustomerEntity[];
   cart: Cart;
   products: ProductServiceItem[];
   promotions: PromotionItem[];
@@ -85,6 +111,17 @@ export type SkillContext = {
   business: BusinessContext;
   role: "customer" | "staff" | "owner";
   isAuthenticated: boolean;
+  recentLogs: Array<{
+    id: string;
+    customerId: string;
+    conversationId: string;
+    message: string;
+    reply: string;
+    createdAt: Date;
+  }>;
+  latestOrder: OrderEntity | null;
+  customerOrders: OrderEntity[];
+  allOrders: OrderEntity[];
 };
 
 export type SkillResult = {
@@ -109,7 +146,7 @@ export type ProductServiceItem = {
   description: string;
   category: string;
   status: "active" | "inactive";
- attributes: ProductAttributes | null;
+  attributes: ProductAttributes | null;
 };
 
 export type SkillHandler = (

@@ -1,5 +1,6 @@
 export type ConversationLog = {
   id: string;
+  businessId: string; // THÊM TRƯỜNG NÀY
   conversationId: string;
   customerId: string;
   message: string;
@@ -11,7 +12,9 @@ const MAX_LOGS = 200;
 
 const logs: ConversationLog[] = [];
 
+// Thêm businessId vào tham số đầu tiên
 export function logTurn(
+  businessId: string,
   conversationId: string,
   customerId: string,
   message: string,
@@ -21,6 +24,7 @@ export function logTurn(
 
   const entry: ConversationLog = {
     id,
+    businessId,
     conversationId,
     customerId,
     message,
@@ -37,8 +41,9 @@ export function logTurn(
   return entry;
 }
 
-export function getRecentLogs(limit: number): ConversationLog[] {
-  const result = [...logs];
+// Cần thêm businessId để lọc log của từng Bot
+export function getRecentLogs(businessId: string, limit: number): ConversationLog[] {
+  const result = logs.filter((l) => l.businessId === businessId);
   result.reverse();
   return result.slice(0, limit);
 }

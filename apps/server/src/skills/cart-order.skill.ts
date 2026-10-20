@@ -16,17 +16,8 @@ import {
   LOGIN_REQUIRED_REPLY,
 } from "../common/messages";
 import { coffeeRules } from "../knowledge/coffee.rules";
-import { updateCart } from "../memory/cart.memory";
-import {
-  Order,
-  getOrder,
-  updateOrder,
-  getLatestOrderByCustomer,
-} from "../memory/order.memory";
-import { safeCallTool } from "../tools/tool.registry";
-import "../tools/create-order.tool";
+import { OrderEntity } from "../order/order.entity";
 import type { SkillContext, SkillResult, BrainEntities } from "./types";
-import type { CreateOrderArgs } from "../tools/create-order.tool";
 export function tryAwaitingConfirm(ctx: SkillContext): SkillResult | null {
   if (!ctx.cart.awaitingConfirm) return null;
 
@@ -36,40 +27,38 @@ export function tryAwaitingConfirm(ctx: SkillContext): SkillResult | null {
   if (yes) {
     const { total } = summarizeCart(ctx.cart.items, [], ctx.products);
 
-    const args: CreateOrderArgs = {
+    // 1. Tạo Object đơn hàng (Không dùng Tool nữa)
+    const newOrder: OrderEntity = {
+      id: `ORD-${Date.now()}`,
+      businessId: ctx.business.id,
       customerId: ctx.customerId,
-      items: ctx.cart.items,
+      items: [...ctx.cart.items],
       total,
+      status: "pending",
+      createdAt: new Date().toISOString(),
+      fulfillment: null,
+      address: null,
+      paymentMethod: null,
     };
 
-    const result = safeCallTool<Order>("create_order", args);
+    // 2. Lưu vào mảng Unit of Work
+    ctx.customerOrders.unshift(newOrder);
 
-    if (!result.ok) {
-      ctx.cart.awaitingConfirm = false;
-      updateCart(ctx.business.id, ctx.customerId, ctx.cart);
+    // 3. ĐỒNG BỘ latestOrder ĐỂ CÁC HÀM KHÁC DÙNG NGAY LẬP TỨC
+    ctx.latestOrder = newOrder;
 
-      return {
-        reply:
-          "Dạ, hệ thống đang gặp sự cố khi tạo đơn ạ. Mình thử lại sau ít phút, hoặc gõ 'gặp nhân viên' để được hỗ trợ ạ.",
-      };
-    }
-
-    const order = result.result;
-
+    // 4. Reset giỏ hàng
     ctx.cart.items = [];
     ctx.cart.awaitingConfirm = false;
-    ctx.cart.pendingOrderId = order.id;
-    updateCart(ctx.business.id, ctx.customerId, ctx.cart);
+    ctx.cart.pendingOrderId = newOrder.id;
 
     return {
-      reply: `Dạ, em đã tạo đơn ${order.id} ạ.\nTổng cộng: ${formatPrice(order.total)}.\nMình muốn nhận tại quán hay giao hàng ạ?`,
+      reply: `Dạ, em đã tạo đơn ${newOrder.id} ạ.\nTổng cộng: ${formatPrice(newOrder.total)}.\nMình muốn nhận tại quán hay giao hàng ạ?`,
     };
   }
 
   if (no) {
     ctx.cart.awaitingConfirm = false;
-    updateCart(ctx.business.id, ctx.customerId, ctx.cart);
-
     return { reply: "Dạ, em chưa đặt đơn ạ. Mình cần thêm gì cứ nói em nhé." };
   }
 
@@ -79,7 +68,9 @@ export function tryAwaitingConfirm(ctx: SkillContext): SkillResult | null {
 export function tryPendingFulfillment(ctx: SkillContext): SkillResult | null {
   if (!ctx.cart.pendingOrderId) return null;
 
-  const order = getOrder(ctx.cart.pendingOrderId);
+  const order = ctx.customerOrders.find(
+    (o) => o.id === ctx.cart.pendingOrderId,
+  );
   const message = ctx.message;
 
   if (order && !order.fulfillment) {
@@ -97,7 +88,7 @@ export function tryPendingFulfillment(ctx: SkillContext): SkillResult | null {
         };
       }
 
-      updateOrder(order.id, { fulfillment: "delivery" });
+      order.fulfillment = "delivery";
 
       return {
         reply:
@@ -106,11 +97,10 @@ export function tryPendingFulfillment(ctx: SkillContext): SkillResult | null {
     }
 
     if (isDineIn) {
-      updateOrder(order.id, { fulfillment: "dine-in" });
+      order.fulfillment = "dine-in";
 
       ctx.cart.pendingOrderId = undefined;
       ctx.cart.pendingPaymentOrderId = order.id;
-      updateCart(ctx.business.id, ctx.customerId, ctx.cart);
 
       return {
         reply: `Dạ, em đã ghi nhận đơn ${order.id} nhận tại quán ạ.\nMình muốn thanh toán tiền mặt hay chuyển khoản ạ?`,
@@ -120,11 +110,10 @@ export function tryPendingFulfillment(ctx: SkillContext): SkillResult | null {
 
   if (order && order.fulfillment === "delivery" && !order.address) {
     const address = message.trim();
-    updateOrder(order.id, { address });
+    order.address = address;
 
     ctx.cart.pendingOrderId = undefined;
     ctx.cart.pendingPaymentOrderId = order.id;
-    updateCart(ctx.business.id, ctx.customerId, ctx.cart);
 
     return {
       reply: `Dạ, em đã ghi nhận đơn ${order.id} giao tới ${address} ạ.\nMình muốn thanh toán tiền mặt hay chuyển khoản ạ?`,
@@ -151,7 +140,7 @@ export function tryOrderStatus(ctx: SkillContext): SkillResult | null {
     return { reply: LOGIN_REQUIRED_REPLY };
   }
 
-  const order = getLatestOrderByCustomer(ctx.customerId);
+  const order = ctx.latestOrder;
 
   if (!order) return { reply: NO_ORDER_REPLY };
 
@@ -192,7 +181,7 @@ export function tryCancelIntent(ctx: SkillContext): SkillResult | null {
     return null;
   }
 
-  const order = getLatestOrderByCustomer(ctx.customerId);
+  const order = ctx.latestOrder;
 
   if (!order) {
     return { reply: "Dạ, hiện tại mình chưa có đơn nào để huỷ ạ." };
@@ -207,7 +196,6 @@ export function tryCancelIntent(ctx: SkillContext): SkillResult | null {
   }
 
   ctx.cart.pendingCancelOrderId = order.id;
-  updateCart(ctx.business.id, ctx.customerId, ctx.cart);
 
   return {
     reply: `Dạ, mình chắc chắn muốn huỷ đơn ${order.id} chứ ạ? (có / không)`,
@@ -217,14 +205,15 @@ export function tryCancelIntent(ctx: SkillContext): SkillResult | null {
 export function tryPendingEditAddress(ctx: SkillContext): SkillResult | null {
   if (!ctx.cart.pendingEditAddressOrderId) return null;
 
-  const order = getOrder(ctx.cart.pendingEditAddressOrderId);
+  const order = ctx.customerOrders.find(
+    (o) => o.id === ctx.cart.pendingEditAddressOrderId,
+  );
 
   if (order) {
     const address = ctx.message.trim();
-    updateOrder(order.id, { address });
+    order.address = address;
 
     ctx.cart.pendingEditAddressOrderId = undefined;
-    updateCart(ctx.business.id, ctx.customerId, ctx.cart);
 
     return {
       reply: `Dạ, em đã cập nhật địa chỉ giao hàng của đơn ${order.id} thành ${address} ạ.`,
@@ -248,7 +237,7 @@ export function tryEditAddressIntent(ctx: SkillContext): SkillResult | null {
     return null;
   }
 
-  const order = getLatestOrderByCustomer(ctx.customerId);
+  const order = ctx.latestOrder;
 
   if (!order) return { reply: NO_ORDER_REPLY };
 
@@ -263,7 +252,6 @@ export function tryEditAddressIntent(ctx: SkillContext): SkillResult | null {
   }
 
   ctx.cart.pendingEditAddressOrderId = order.id;
-  updateCart(ctx.business.id, ctx.customerId, ctx.cart);
 
   return { reply: "Dạ, mình cho em xin địa chỉ mới ạ." };
 }
@@ -271,7 +259,9 @@ export function tryEditAddressIntent(ctx: SkillContext): SkillResult | null {
 export function tryPendingCancel(ctx: SkillContext): SkillResult | null {
   if (!ctx.cart.pendingCancelOrderId) return null;
 
-  const order = getOrder(ctx.cart.pendingCancelOrderId);
+  const order = ctx.customerOrders.find(
+    (o) => o.id === ctx.cart.pendingCancelOrderId,
+  );
 
   if (!order) return null;
 
@@ -279,17 +269,15 @@ export function tryPendingCancel(ctx: SkillContext): SkillResult | null {
   const no = isNo(ctx.message);
 
   if (yes) {
-    updateOrder(order.id, { status: "cancelled" });
+    order.status = "cancelled";
 
     ctx.cart.pendingCancelOrderId = undefined;
-    updateCart(ctx.business.id, ctx.customerId, ctx.cart);
 
     return { reply: `Dạ, em đã huỷ đơn ${order.id} ạ.` };
   }
 
   if (no) {
     ctx.cart.pendingCancelOrderId = undefined;
-    updateCart(ctx.business.id, ctx.customerId, ctx.cart);
 
     return { reply: `Dạ, em giữ nguyên đơn ${order.id} ạ.` };
   }
@@ -302,7 +290,9 @@ export function tryPendingCancel(ctx: SkillContext): SkillResult | null {
 export function tryPendingPayment(ctx: SkillContext): SkillResult | null {
   if (!ctx.cart.pendingPaymentOrderId) return null;
 
-  const order = getOrder(ctx.cart.pendingPaymentOrderId);
+  const order = ctx.customerOrders.find(
+    (o) => o.id === ctx.cart.pendingPaymentOrderId,
+  );
 
   if (!order) return null;
 
@@ -312,10 +302,9 @@ export function tryPendingPayment(ctx: SkillContext): SkillResult | null {
   );
 
   if (isCash) {
-    updateOrder(order.id, { paymentMethod: "cash", status: "confirmed" });
-
+    order.paymentMethod = "cash";
+    order.status = "confirmed";
     ctx.cart.pendingPaymentOrderId = undefined;
-    updateCart(ctx.business.id, ctx.customerId, ctx.cart);
 
     return {
       reply: `Dạ, em đã ghi nhận đơn ${order.id} thanh toán tiền mặt ạ. Đơn của mình đã được xác nhận ạ.`,
@@ -323,13 +312,10 @@ export function tryPendingPayment(ctx: SkillContext): SkillResult | null {
   }
 
   if (isTransfer) {
-    updateOrder(order.id, {
-      paymentMethod: "bank-transfer",
-      status: "confirmed",
-    });
+    order.paymentMethod = "bank-transfer";
+    order.status = "confirmed";
 
     ctx.cart.pendingPaymentOrderId = undefined;
-    updateCart(ctx.business.id, ctx.customerId, ctx.cart);
 
     return {
       reply: `Dạ, em đã ghi nhận đơn ${order.id} thanh toán chuyển khoản ạ. Đơn của mình đã được xác nhận ạ.`,
@@ -359,7 +345,6 @@ export function tryOrderIntent(ctx: SkillContext): SkillResult | null {
 
   const { lines, total } = summarizeCart(ctx.cart.items, [], ctx.products);
   ctx.cart.awaitingConfirm = true;
-  updateCart(ctx.business.id, ctx.customerId, ctx.cart);
 
   return {
     reply: `Dạ, đơn của mình hiện tại:\n\n${lines.join("\n")}\n\nTổng cộng: ${formatPrice(total)} ạ.\n\nMình xác nhận đặt đơn này chứ ạ?`,
@@ -410,7 +395,6 @@ export function tryClearCart(ctx: SkillContext): SkillResult | null {
   }
 
   ctx.cart.items = [];
-  updateCart(ctx.business.id, ctx.customerId, ctx.cart);
 
   return { reply: "Dạ, em đã xoá sạch giỏ hàng ạ." };
 }
@@ -454,7 +438,6 @@ export function tryRemoveMatch(ctx: SkillContext): SkillResult | null {
   if (existingIndex === -1) return { reply: notInCartReply(item.name) };
 
   ctx.cart.items.splice(existingIndex, 1);
-  updateCart(ctx.business.id, ctx.customerId, ctx.cart);
 
   return { reply: `Dạ, em đã xoá ${item.name} khỏi giỏ hàng ạ.` };
 }
@@ -481,13 +464,11 @@ export function tryEditTarget(ctx: SkillContext): SkillResult | null {
 
   if (editTarget.quantity <= 0) {
     ctx.cart.items.splice(existingIndex, 1);
-    updateCart(ctx.business.id, ctx.customerId, ctx.cart);
 
     return { reply: `Dạ, em đã xoá ${item.name} khỏi giỏ hàng ạ.` };
   }
 
   ctx.cart.items[existingIndex].quantity = editTarget.quantity;
-  updateCart(ctx.business.id, ctx.customerId, ctx.cart);
 
   return {
     reply: `Dạ, em đã cập nhật ${item.name} thành ${editTarget.quantity} ạ.`,
@@ -588,8 +569,6 @@ function applyAddItem(
   } else {
     ctx.cart.items.push({ name: item.name, quantity, note });
   }
-
-  updateCart(ctx.business.id, ctx.customerId, ctx.cart);
 
   return { reply: `Dạ, em đã thêm ${quantity} ${item.name} vào giỏ hàng ạ.` };
 }

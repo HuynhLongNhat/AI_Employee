@@ -1,23 +1,40 @@
-import { Controller, Get, Param, NotFoundException, Req, UseGuards, Post, Body, Delete, Patch } from "@nestjs/common";
+import {
+  Controller,
+  Get,
+  Param,
+  NotFoundException,
+  Req,
+  UseGuards,
+  Post,
+  Body,
+  Delete,
+  Patch,
+} from "@nestjs/common";
 import { BusinessService } from "./business.service";
 import { ClerkAuthGuard } from "../auth/clerk-auth.guard";
 import { UserEntity } from "../auth/user.entity";
+import { ConversationLogService } from "../chat/conversation-log.service";
 
 @Controller("businesses")
 export class BusinessController {
-  constructor(private readonly businessService: BusinessService) {}
+  constructor(
+    private readonly businessService: BusinessService,
+    private readonly conversationLogService: ConversationLogService,
+  ) {}
 
   // 1. ROUTE PUBLIC: BẮT BUỘC KHÔNG CÓ @UseGuards và phải nằm TRÊN CÙNG
   @Get("public/:slug")
   async getPublicBusiness(@Param("slug") slug: string) {
     const biz = await this.businessService.findBySlug(slug);
     if (!biz) {
-      throw new NotFoundException("Doanh nghiệp không tồn tại hoặc đã ngừng hoạt động.");
+      throw new NotFoundException(
+        "Doanh nghiệp không tồn tại hoặc đã ngừng hoạt động.",
+      );
     }
-    return { 
-      id: biz.id, 
-      name: biz.name, 
-      industry: biz.industry 
+    return {
+      id: biz.id,
+      name: biz.name,
+      industry: biz.industry,
     };
   }
 
@@ -39,7 +56,7 @@ export class BusinessController {
     return this.businessService.create(user.id, body);
   }
 
-   @Patch(":id")
+  @Patch(":id")
   @UseGuards(ClerkAuthGuard)
   async update(
     @Param("id") id: string,
@@ -48,7 +65,8 @@ export class BusinessController {
   ) {
     const user = (req as any).user as UserEntity;
     const updated = await this.businessService.update(id, user.id, body);
-    if (!updated) throw new NotFoundException("Không tìm thấy hoặc không có quyền.");
+    if (!updated)
+      throw new NotFoundException("Không tìm thấy hoặc không có quyền.");
     return updated;
   }
 
@@ -57,7 +75,23 @@ export class BusinessController {
   async remove(@Param("id") id: string, @Req() req: Request) {
     const user = (req as any).user as UserEntity;
     const success = await this.businessService.remove(id, user.id);
-    if (!success) throw new NotFoundException("Không tìm thấy hoặc không có quyền.");
+    if (!success)
+      throw new NotFoundException("Không tìm thấy hoặc không có quyền.");
     return { ok: true };
+  }
+
+   @Get(":id/logs")
+  @UseGuards(ClerkAuthGuard)
+  async getLogs(@Param("id") id: string, @Req() req: Request) {
+    const user = (req as any).user as UserEntity;
+    
+    // Kiểm tra xem user có sở hữu business này không
+    const biz = await this.businessService.findOne(id);
+    if (!biz || biz.ownerUserId !== user.id) {
+      throw new NotFoundException("Không có quyền truy cập.");
+    }
+
+    // Lấy 50 log gần nhất từ DB
+    return this.conversationLogService.getRecentLogs(id, 50);
   }
 }

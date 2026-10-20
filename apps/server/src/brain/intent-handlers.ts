@@ -81,7 +81,6 @@ export const INTENT_HANDLERS: Record<Intent, SkillHandler> = {
   "owner.aov": ownerOps.tryAov,
   "owner.care_suggestions": ownerOps.tryCareSuggestions,
   "owner.tier_upgrade_candidates": ownerOps.tryTierUpgrade,
-  "owner.view_conversation_logs": ownerOps.tryViewLogs,
 
   // ===== Knowledge admin =====,
   "admin.view_knowledge": knowledgeAdmin.tryViewKnowledge,
@@ -91,6 +90,5 @@ export const INTENT_HANDLERS: Record<Intent, SkillHandler> = {
 
   // ===== Automation =====
   "automation.run_remind_vip": automation.tryRunAutomation,
-  "automation.view_logs": automation.tryViewAutomationLogs,
 
 };

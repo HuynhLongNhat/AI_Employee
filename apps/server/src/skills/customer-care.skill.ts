@@ -6,18 +6,10 @@ import {
   PROMPT_RESERVATION_TIME,
 } from "../common/messages";
 import { isRegularCustomer } from "../knowledge/coffee.rules";
-import { getMembership } from "../memory/membership.memory";
-import {
-  getOrdersByCustomer,
-  getLatestOrderByCustomer,
-  sumOrderTotals,
-  isActiveOrder,
-} from "../memory/order.memory";
 import { createComplaint } from "../memory/complaint.memory";
 import { createRefund } from "../memory/refund.memory";
 import { createHandoff } from "../memory/handoff.memory";
 import { createReservation } from "../memory/reservation.memory";
-import { updateCart } from "../memory/cart.memory";
 import type { SkillContext, SkillResult } from "./types";
 
 export function tryPendingComplaint(ctx: SkillContext): SkillResult | null {
@@ -30,7 +22,6 @@ export function tryPendingComplaint(ctx: SkillContext): SkillResult | null {
   const complaint = createComplaint(ctx.customerId, content);
 
   ctx.cart.pendingComplaint = false;
-  updateCart(ctx.business.id, ctx.customerId, ctx.cart);
 
   return {
     reply: `Dạ, em đã ghi nhận khiếu nại ${complaint.id} ạ. Quán sẽ kiểm tra và phản hồi mình sớm ạ.`,
@@ -44,11 +35,11 @@ export function tryPendingRefund(ctx: SkillContext): SkillResult | null {
 
   if (!reason) return { reply: PROMPT_REFUND_REASON };
 
-  const latestOrder = getLatestOrderByCustomer(ctx.customerId);
+  // ĐỌC TỪ CONTEXT THAY VÌ MEMORY
+  const latestOrder = ctx.latestOrder; 
   const refund = createRefund(ctx.customerId, reason, latestOrder?.id);
 
   ctx.cart.pendingRefund = false;
-  updateCart(ctx.business.id, ctx.customerId, ctx.cart);
 
   const orderText = refund.orderId ? ` cho đơn ${refund.orderId}` : "";
 
@@ -69,14 +60,14 @@ export function tryRefundIntent(ctx: SkillContext): SkillResult | null {
     return null;
   }
 
-  const latestOrder = getLatestOrderByCustomer(ctx.customerId);
+  // ĐỌC TỪ CONTEXT
+  const latestOrder = ctx.latestOrder;
 
   if (!latestOrder) {
     return { reply: "Dạ, hiện tại mình chưa có đơn nào để hoàn tiền ạ." };
   }
 
   ctx.cart.pendingRefund = true;
-  updateCart(ctx.business.id, ctx.customerId, ctx.cart);
 
   return { reply: PROMPT_REFUND_REASON };
 }
@@ -101,7 +92,6 @@ export function tryPendingReservation(ctx: SkillContext): SkillResult | null {
     if (rest) r.time = rest;
 
     ctx.cart.pendingReservation = r;
-    updateCart(ctx.business.id, ctx.customerId, ctx.cart);
 
     if (r.time === undefined) return { reply: PROMPT_RESERVATION_TIME };
   }
@@ -115,7 +105,6 @@ export function tryPendingReservation(ctx: SkillContext): SkillResult | null {
   const reservation = createReservation(ctx.customerId, r.people!, r.time!);
 
   ctx.cart.pendingReservation = undefined;
-  updateCart(ctx.business.id, ctx.customerId, ctx.cart);
 
   return {
     reply: `Dạ, em đã ghi nhận đặt bàn ${reservation.id} cho ${r.people} người vào ${r.time} ạ.`,
@@ -134,7 +123,6 @@ export function tryReservationIntent(ctx: SkillContext): SkillResult | null {
   }
 
   ctx.cart.pendingReservation = {};
-  updateCart(ctx.business.id, ctx.customerId, ctx.cart);
 
   return { reply: "Dạ, mình đặt bàn cho mấy người và vào lúc mấy giờ ạ?" };
 }
@@ -159,7 +147,7 @@ export function tryTierQuery(ctx: SkillContext): SkillResult | null {
   if (!ctx.isAuthenticated) {
     return { reply: LOGIN_REQUIRED_REPLY };
   }
-  const membership = getMembership(ctx.customerId);
+  const membership = ctx.customer;
   const tierText = formatTier(membership.tier);
 
   if (asksTier) {
@@ -186,14 +174,17 @@ export function tryHistory(ctx: SkillContext): SkillResult | null {
   if (!ctx.isAuthenticated) {
     return { reply: LOGIN_REQUIRED_REPLY };
   }
-  const orders = getOrdersByCustomer(ctx.customerId);
+
+  const orders = ctx.customerOrders;
   const businessName = ctx.business.name || "quán";
+  
   if (orders.length === 0) {
     return { reply: `Dạ, mình chưa có đơn nào tại ${businessName} ạ.` };
   }
 
-  const validOrders = orders.filter(isActiveOrder);
-  const totalSpent = sumOrderTotals(validOrders);
+  // Thay thế isActiveOrder và sumOrderTotals (đã xóa ở memory) bằng code nội bộ
+  const validOrders = orders.filter((o) => o.status !== "cancelled");
+  const totalSpent = validOrders.reduce((sum, o) => sum + o.total, 0);
 
   const latest = orders[0];
   const latestStatus =
@@ -220,11 +211,13 @@ export function tryRegular(ctx: SkillContext): SkillResult | null {
     return null;
   }
 
-  const orders = getOrdersByCustomer(ctx.customerId).filter(isActiveOrder);
+  // ĐỌC TỪ CONTEXT THAY VÌ MEMORY
+  const orders = ctx.customerOrders.filter((o) => o.status !== "cancelled");
   const orderCount = orders.length;
-  const membership = getMembership(ctx.customerId);
+  const membership = ctx.customer;
   const tierText = formatTier(membership.tier);
   const businessName = ctx.business.name || "quán";
+  
   if (isRegularCustomer(orderCount)) {
     const nameText = ctx.customer?.name ? ` ${ctx.customer.name}` : "";
 
@@ -251,7 +244,6 @@ export function tryComplaintIntent(ctx: SkillContext): SkillResult | null {
   }
 
   ctx.cart.pendingComplaint = true;
-  updateCart(ctx.business.id, ctx.customerId, ctx.cart);
 
   return { reply: PROMPT_COMPLAINT_CONTENT };
 }
@@ -273,7 +265,6 @@ export function tryHandoffIntent(ctx: SkillContext): SkillResult | null {
 
   ctx.cart.handoffRequested = true;
   ctx.cart.handoffId = handoff.id;
-  updateCart(ctx.business.id, ctx.customerId, ctx.cart);
 
   return {
     reply:

@@ -1,5 +1,14 @@
-import { Body, Controller, Post, Headers } from "@nestjs/common";
-import { getCart } from "../memory/cart.memory";
+import {
+  Body,
+  Controller,
+  Post,
+  Headers,
+  Get,
+  Query,
+  NotFoundException,
+  UseGuards,
+  Req,
+} from "@nestjs/common";
 import {
   runHandlers,
   SkillContext,
@@ -12,8 +21,6 @@ import * as customerCare from "../skills/customer-care.skill";
 import * as ownerOps from "../skills/owner-operations.skill";
 import * as knowledgeAdmin from "../skills/knowledge-admin.skill";
 import * as automation from "../skills/automation.skill";
-import { logTurn } from "../memory/conversation.log.memory";
-import { getCustomer } from "../memory/customer.memory";
 import { addMessage } from "../memory/chat.memory";
 import { brain } from "../brain/brain.instance";
 import { buildBrainInput } from "../brain/brain-input.builder";
@@ -37,7 +44,14 @@ import { enrich } from "./response-enricher";
 import { verifyToken } from "@clerk/backend";
 import { UserService } from "../auth/user.service";
 import { setRole } from "../memory/role.memory";
+import { CartService } from "../cart/cart.service";
+import { ConversationLogService } from "./conversation-log.service";
+import { OrderService } from "../order/order.service";
+import { CustomerService } from "../customer/customer.service";
+import { ChatAuthGuard } from "../auth/chat-auth.guard";
+
 @Controller("chat")
+@UseGuards(ChatAuthGuard)
 export class ChatController {
   constructor(
     private readonly businessKnowledge: BusinessKnowledgeService,
@@ -47,27 +61,40 @@ export class ChatController {
     private readonly policyService: PolicyService,
     private readonly businessService: BusinessService,
     private readonly userService: UserService,
+    private readonly cartService: CartService,
+    private readonly conversationLogService: ConversationLogService,
+    private readonly orderService: OrderService,
+    private readonly customerService: CustomerService,
   ) {}
 
   @Post()
   async chat(
     @Body()
-    body: { message: string; conversationId: string; customerId: string },
+    body: {
+      message: string;
+      conversationId: string;
+      userName?: string;
+    },
+    @Req() req: any,
     @Headers("x-business-id") businessIdHeader?: string,
     @Headers("authorization") authHeader?: string,
   ) {
-    const result = await this.chatInternal(body, businessIdHeader, authHeader);
-    logTurn(body.conversationId, body.customerId, body.message, result.reply);
-    return result;
+    // Gọi chatInternal và nhận kết quả (đã bao gồm việc save cart và log)
+    return this.chatInternal(body, req.user, businessIdHeader, authHeader);
   }
 
   private async chatInternal(
-    body: { message: string; conversationId: string; customerId: string },
+    body: {
+      message: string;
+      conversationId: string;
+      userName?: string;
+    },
+    reqUser: { customerId: string; role: string },
     businessIdHeader?: string,
     authHeader?: string,
   ): Promise<SkillResult> {
     const message = body.message.toLowerCase().trim();
-    const customerId = body.customerId;
+    const customerId = reqUser.customerId;
     const conversationId = body.conversationId;
 
     // ===== 1. Resolve active business =====
@@ -79,12 +106,14 @@ export class ChatController {
     }
 
     if (!activeBusiness) {
-      activeBusiness = await this.businessService.getDefaultBusiness();
+      throw new NotFoundException(
+        "Business không tồn tại hoặc đường dẫn không hợp lệ.",
+      );
     }
 
-    const businessId = activeBusiness?.id ?? "";
+    const businessId = activeBusiness.id;
 
-    // ===== Optional Clerk verification =====
+    // ===== 2. Verify Clerk & Determine role =====
     let authenticatedUserId: string | null = null;
 
     if (authHeader?.startsWith("Bearer ")) {
@@ -94,12 +123,9 @@ export class ChatController {
           secretKey: process.env.CLERK_SECRET_KEY!,
         });
         authenticatedUserId = payload.sub;
-      } catch {
-        // Invalid/expired token → treat as guest
-      }
+      } catch {}
     }
 
-    // ===== Determine role =====
     let role: "customer" | "staff" | "owner" = "customer";
 
     if (authenticatedUserId) {
@@ -113,9 +139,9 @@ export class ChatController {
     }
 
     setRole(customerId, role);
-
     const isAuthenticated = authenticatedUserId !== null;
-    // ===== 2. Load business knowledge =====
+
+    // ===== 3. Load business knowledge =====
     const [
       profile,
       businessNameRes,
@@ -125,7 +151,7 @@ export class ChatController {
       hoursRes,
       wifiNameRes,
       wifiPassRes,
-    ] = businessId
+    ] = activeBusiness
       ? await Promise.all([
           this.businessKnowledge.getBusinessProfile(businessId),
           this.businessKnowledge.getBusinessName(businessId),
@@ -153,62 +179,34 @@ export class ChatController {
           null,
           null,
         ];
-    // ===== 3. Load products / promotions / faqs / policies =====
+
+    // ===== 4. Load products / promotions / faqs / policies =====
     const productsRaw = activeBusiness
       ? await this.productService.findAllActive(activeBusiness.id)
       : [];
-
     const products: ProductServiceItem[] = productsRaw.map((p) => ({
-      id: p.id,
-      name: p.name,
-      price: p.price,
-      description: p.description,
-      category: p.category,
-      status: p.status,
+      ...p,
       attributes: p.attributes ?? null,
     }));
 
     const promotionsRaw = activeBusiness
       ? await this.promotionService.findAllActive(activeBusiness.id)
       : [];
-
-    const promotions: PromotionItem[] = promotionsRaw.map((p) => ({
-      id: p.id,
-      name: p.name,
-      description: p.description,
-      keywords: p.keywords,
-      condition: p.condition,
-      discount: p.discount,
-      scope: p.scope,
-      productIds: p.productIds,
-      status: p.status,
-    }));
+    const promotions: PromotionItem[] = promotionsRaw.map((p) => ({ ...p }));
 
     const faqsRaw = activeBusiness
       ? await this.faqService.findAllActive(activeBusiness.id)
       : [];
-
-    const faqs: FaqItem[] = faqsRaw.map((f) => ({
-      id: f.id,
-      question: f.question,
-      answer: f.answer,
-      status: f.status,
-    }));
+    const faqs: FaqItem[] = faqsRaw.map((f) => ({ ...f }));
 
     const policiesRaw = activeBusiness
       ? await this.policyService.findAllActive(activeBusiness.id)
       : [];
+    const policies: PolicyItem[] = policiesRaw.map((p) => ({ ...p }));
 
-    const policies: PolicyItem[] = policiesRaw.map((p) => ({
-      id: p.id,
-      title: p.title,
-      content: p.content,
-      status: p.status,
-    }));
-
-    // ===== 4. Build BusinessContext =====
+    // ===== 5. Build Contexts =====
     const businessCtx: BusinessContext = {
-      id: activeBusiness?.id ?? "default",
+      id: businessId,
       name: activeBusiness?.name ?? businessNameRes ?? "",
       industry: activeBusiness?.industry || (profile.industry ?? ""),
       terminology: {
@@ -222,13 +220,35 @@ export class ChatController {
       wifiName: wifiNameRes ?? "",
       wifiPassword: wifiPassRes ?? "",
     };
-    // ===== 5. Build SkillContext =====
+
+    // LẤY GIỎ HÀNG TỪ DB
+    const cartData = await this.cartService.getCart(businessId, customerId);
+    const recentLogs =
+      role === "owner"
+        ? await this.conversationLogService.getRecentLogs(businessId, 20)
+        : [];
+    const customerOrders = await this.orderService.getCustomerOrders(
+      businessId,
+      customerId,
+    );
+    const latestOrder = customerOrders.length > 0 ? customerOrders[0] : null;
+    const allOrders =
+      role === "owner" ? await this.orderService.getAllOrders(businessId) : [];
+
+    const allCustomers =
+      role === "owner" ? await this.customerService.getAll(businessId) : [];
+
+    const customerEntity = await this.customerService.getOrCreate(
+      businessId,
+      customerId,
+      body.userName,
+    );
     const ctx: SkillContext = {
       message,
       customerId,
       conversationId,
-      customer: getCustomer(customerId),
-     cart: getCart(activeBusiness?.id ?? "default", customerId),
+      customer: customerEntity,
+      cart: cartData,
       products,
       promotions,
       policies,
@@ -242,6 +262,34 @@ export class ChatController {
       role,
       isAuthenticated,
       business: businessCtx,
+      recentLogs,
+      latestOrder,
+      customerOrders,
+      allOrders,
+      allCustomers,
+    };
+
+    // ===== HELPER: Bọc kết quả để lưu Cart và Log (Tư duy Unit of Work) =====
+    const finalize = async (res: SkillResult) => {
+      console.log("=== DEBUG CHAT ===");
+      console.log("Customer ID:", customerId);
+      console.log("Message:", message);
+      console.log("Saved Name in DB:", ctx.customer.name);
+      const enrichedResult = enrich(res, ctx);
+
+      await this.cartService.saveCart(businessId, customerId, ctx.cart);
+      await this.orderService.saveMany(ctx.customerOrders);
+      await this.customerService.save(ctx.customer);
+      // Đổi sang gọi DB thay vì gọi hàm memory cũ
+      await this.conversationLogService.logTurn(
+        businessId,
+        conversationId,
+        customerId,
+        message,
+        enrichedResult.reply,
+      );
+
+      return enrichedResult;
     };
 
     // ===== 6. Dispatch beforeAddMessage =====
@@ -268,12 +316,10 @@ export class ChatController {
       ownerOps.tryCareSuggestions,
       ownerOps.tryTierUpgrade,
       automation.tryRunAutomation,
-      automation.tryViewAutomationLogs,
       ownerOps.tryViewAllOrders,
       knowledgeAdmin.tryViewKnowledge,
       knowledgeAdmin.tryViewPromotions,
       knowledgeAdmin.tryViewRefundPolicy,
-      ownerOps.tryViewLogs,
       customerCare.tryTierQuery,
       customerCare.tryHistory,
       customerCare.tryRegular,
@@ -293,13 +339,13 @@ export class ChatController {
       cartOrder.tryEditTarget,
       cartOrder.tryQuantityMatch,
       customerService.tryPromotions,
-      customerService.trySetName,
       customerService.tryRecallName,
+      customerService.trySetName,
       customerService.tryShortContext,
     ];
 
     const beforeResult = runHandlers(beforeAddMessage, ctx);
-    if (beforeResult) return enrich(beforeResult, ctx);
+    if (beforeResult) return finalize(beforeResult);
 
     addMessage(conversationId, message);
 
@@ -311,7 +357,7 @@ export class ChatController {
       const handler = INTENT_HANDLER_MAP[brainOutput.intent];
       if (handler) {
         const brainResult = handler(ctx, brainOutput.entities);
-        if (brainResult) return enrich(brainResult, ctx);
+        if (brainResult) return finalize(brainResult);
       }
     }
 
@@ -333,8 +379,44 @@ export class ChatController {
     ];
 
     const afterResult = runHandlers(afterAddMessage, ctx);
-    if (afterResult) return enrich(afterResult, ctx);
+    if (afterResult) return finalize(afterResult);
 
-    return enrich(customerService.tryFallback(ctx), ctx);
+    return finalize(customerService.tryFallback(ctx));
+  }
+
+  @Get("conversations")
+  async getConversations(
+    @Req() req: any,
+    @Query("businessId") businessIdHeader: string, // <-- Đổi sang Query
+  ) {
+    const customerId = req.user.customerId;
+    if (!customerId) return [];
+    const activeBusiness = await this.businessService.findOne(businessIdHeader);
+    if (!activeBusiness) throw new NotFoundException("Business not found");
+    return this.conversationLogService.getCustomerConversations(
+      activeBusiness.id,
+      customerId,
+    );
+  }
+
+  @Get("history")
+  async getHistory(
+    @Req() req: any,
+    @Query("businessId") businessIdHeader: string,
+    @Query("conversationId") conversationId: string,
+  ) {
+    const customerId = req.user.customerId;
+    if (!conversationId || !customerId) return []; // Trả về rỗng thay vì lỗi
+
+    const activeBusiness = await this.businessService.findOne(businessIdHeader);
+
+    if (!activeBusiness) throw new NotFoundException("Business not found");
+    const logs = await this.conversationLogService.getConversationHistory(
+      activeBusiness.id,
+      conversationId,
+      customerId,
+    );
+
+    return logs; // Nếu không có log, nó tự trả về mảng rỗng []
   }
 }

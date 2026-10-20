@@ -1,5 +1,4 @@
 import { getConversation } from "../memory/chat.memory";
-import { updateCustomer } from "../memory/customer.memory";
 import { findProductByName } from "../common/menu";
 import type {
   BrainEntities,
@@ -66,29 +65,54 @@ export function tryPromotions(
 }
 
 export function trySetName(ctx: SkillContext): SkillResult | null {
-  if (!ctx.message.startsWith("mình tên ")) return null;
+  const m = ctx.message;
 
-  const name = ctx.message.replace("mình tên ", "").trim();
-  updateCustomer(ctx.customerId, { name });
+  // 1. Chặn ngay các câu hỏi để nhường cho tryRecallName
+  if (m.includes("gì") || m.includes("?") || m.includes("hả")) return null;
 
+  let name = "";
+
+  // 2. Regex bắt xuôi: "mình tên Nam", "tôi tên là Nam"
+  const matchXuoi = m.match(/^(mình|tôi|em|tớ)\s+tên\s+(?:là\s+)?(.+)$/);
+
+  // 3. Regex bắt ngược: "tên tôi là Nam", "tên của mình là Nam"
+  const matchNguoc = m.match(
+    /^tên\s+(?:của\s+)?(mình|tôi|em|tớ)\s+(?:là\s+)?(.+)$/,
+  );
+
+  if (matchXuoi) {
+    name = matchXuoi[2].trim();
+  } else if (matchNguoc) {
+    name = matchNguoc[2].trim();
+  } else {
+    return null;
+  }
+
+  // 4. Bỏ đuôi "ạ" nếu user gõ dư
+  name = name.replace(/\s+ạ$/, "").trim();
+  if (!name) return null;
+
+  ctx.customer.name = name;
   return { reply: `Dạ, em nhớ rồi ạ. Em chào ${name}!` };
 }
 
 export function tryRecallName(ctx: SkillContext): SkillResult | null {
   const m = ctx.message;
 
-  if (
-    !m.includes("nhớ tên mình") &&
-    !m.includes("tên mình là gì") &&
-    !m.includes("tên tôi là gì")
-  ) {
-    return null;
-  }
+  // Mở rộng các biến thể câu hỏi
+  const isRecall =
+    m.includes("nhớ tên") ||
+    m.includes("tên mình là gì") ||
+    m.includes("mình tên là gì") ||
+    m.includes("tên tôi là gì") ||
+    m.includes("tôi tên là gì") ||
+    m.includes("tên gì");
+
+  if (!isRecall) return null;
 
   if (ctx.customer?.name) {
     return { reply: `Dạ nhớ chứ ạ, mình tên ${ctx.customer.name}.` };
   }
-
   return { reply: "Dạ, hiện tại em chưa biết tên của mình ạ." };
 }
 

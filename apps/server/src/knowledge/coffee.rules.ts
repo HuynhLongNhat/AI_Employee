@@ -1,4 +1,5 @@
-import type { MembershipTier } from "../memory/membership.memory";
+// Khai báo trực tiếp type thay vì import từ memory cũ
+export type MembershipTier = "bronze" | "silver" | "gold";
 
 export const coffeeRules = {
   openingHour: 7,

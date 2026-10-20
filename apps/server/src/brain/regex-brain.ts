@@ -201,14 +201,6 @@ const RULES: IntentRule[] = [
       m.includes("chạy automation remind vip"),
     confidence: 0.9,
   },
-  {
-    intent: "automation.view_logs",
-    when: (m) =>
-      m.includes("xem log automation") ||
-      m.includes("log automation") ||
-      m.includes("lịch sử automation"),
-    confidence: 0.9,
-  },
 
   {
     intent: "owner.view_all_orders",
@@ -248,16 +240,6 @@ const RULES: IntentRule[] = [
       m.includes("xem policy hoàn tiền"),
     confidence: 0.9,
   },
-  {
-    intent: "owner.view_conversation_logs",
-    when: (m) =>
-      m.includes("xem logs") ||
-      m.includes("xem log") ||
-      m.includes("lịch sử chat") ||
-      m.includes("xem conversation"),
-    confidence: 0.9,
-  },
-
   // ===== CUSTOMER-SERVICE CÒN LẠI =====
   {
     intent: "membership.query_tier",
